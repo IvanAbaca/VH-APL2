@@ -12,7 +12,7 @@
 #include <ctime>
 #include <sstream>
 
-#define PUERTO 5001
+#define PUERTO 5000
 #define BUFFER_SIZE 1024
 
 enum EstadoJugador {
@@ -76,6 +76,7 @@ void* partida_jugador(void* arg) {
         int bytes = recv(jugador->socket_fd, buffer, 1, 0);
 
         if (bytes <= 0) {
+            jugador->tiempo_fin = std::chrono::steady_clock::now();
             std::cerr << "Jugador '" << jugador->nickname << "' se desconectó durante la partida.\n";
             std::lock_guard<std::mutex> lock(mutex_jugadores);
             jugador->estado = DESCONECTADO;
@@ -89,7 +90,7 @@ void* partida_jugador(void* arg) {
         if (std::find(letras_usadas.begin(), letras_usadas.end(), letra) != letras_usadas.end()) {
             std::string msg = "Letra ya usada.\n";
             send(jugador->socket_fd, msg.c_str(), msg.size(), 0);
-            return nullptr;
+            continue; // seguir escuchando
         }
 
         letras_usadas.push_back(letra);
