@@ -4,16 +4,48 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define PUERTO 5000
 #define BUFFER_SIZE 1024
 
+void mostrar_ayuda() {
+    std::cout << "Uso: ./cliente [opciones]\n"
+              << "Opciones:\n"
+              << "  -n  --nickname <nombre>     Nickname del jugador (requerido)\n"
+              << "  -p  --puerto <número>       Puerto del servidor (requerido)\n"
+              << "  -s  --servidor <IP>         IP del servidor (requerido)\n"
+              << "  -h  --help                  Muestra esta ayuda\n";
+}
+
 int main(int argc, char* argv[]) {
-    if (argc != 3 || std::string(argv[1]) != "--nickname") {
-        std::cerr << "Uso: " << argv[0] << " --nickname <tu_nombre>\n";
+    std::string nickname, ip_servidor;
+    int puerto = -1;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        if (arg == "-h" || arg == "--help") {
+            mostrar_ayuda();
+            return 0;
+        } else if ((arg == "-n" || arg == "--nickname") && i + 1 < argc) {
+            nickname = argv[++i];
+        } else if ((arg == "-p" || arg == "--puerto") && i + 1 < argc) {
+            puerto = std::stoi(argv[++i]);
+        } else if ((arg == "-s" || arg == "--servidor") && i + 1 < argc) {
+            ip_servidor = argv[++i];
+        } else {
+            std::cerr << "Parámetro no reconocido: " << arg << "\n";
+            mostrar_ayuda();
+            return 1;
+        }
+    }
+
+    if (nickname.empty() || ip_servidor.empty() || puerto <= 0) {
+        std::cerr << "Faltan parámetros requeridos.\n\n";
+        mostrar_ayuda();
         return 1;
     }
 
-    std::string nickname = argv[2];
+    // 🔽 A partir de acá va tu código actual pero usando las variables nickname, puerto, ip_servidor
+
     int cliente_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (cliente_fd == -1) {
         std::cerr << "Error al crear socket\n";
@@ -22,8 +54,8 @@ int main(int argc, char* argv[]) {
 
     sockaddr_in servidor{};
     servidor.sin_family = AF_INET;
-    servidor.sin_port = htons(PUERTO);
-    servidor.sin_addr.s_addr = inet_addr("127.0.0.1");
+    servidor.sin_port = htons(puerto);
+    servidor.sin_addr.s_addr = inet_addr(ip_servidor.c_str());
 
     if (connect(cliente_fd, (sockaddr*)&servidor, sizeof(servidor)) < 0) {
         std::cerr << "Error al conectar con el servidor\n";
