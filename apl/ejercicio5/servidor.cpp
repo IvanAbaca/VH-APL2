@@ -40,6 +40,7 @@ struct Jugador {
 
 int puerto = -1;
 int max_usuarios = -1;
+int max_errores = 7;
 std::vector<Jugador> jugadores;
 std::mutex mutex_jugadores;
 EstadoServidor estado_servidor = SERVIDOR_ESPERANDO_CONEXIONES;
@@ -113,6 +114,70 @@ void enviar_resultados_finales() {
     reiniciar_servidor();
 }
 
+std::string dibujo_ahorcado(int errores) {
+    const std::vector<std::string> estados = {
+        " +---+\n"
+        " |   |\n"
+        "     |\n"
+        "     |\n"
+        "     |\n"
+        "     |\n"
+        "=========\n",
+
+        " +---+\n"
+        " |   |\n"
+        " O   |\n"
+        "     |\n"
+        "     |\n"
+        "     |\n"
+        "=========\n",
+
+        " +---+\n"
+        " |   |\n"
+        " O   |\n"
+        " |   |\n"
+        "     |\n"
+        "     |\n"
+        "=========\n",
+
+        " +---+\n"
+        " |   |\n"
+        " O   |\n"
+        "/|   |\n"
+        "     |\n"
+        "     |\n"
+        "=========\n",
+
+        " +---+\n"
+        " |   |\n"
+        " O   |\n"
+        "/|\\  |\n"
+        "     |\n"
+        "     |\n"
+        "=========\n",
+
+        " +---+\n"
+        " |   |\n"
+        " O   |\n"
+        "/|\\  |\n"
+        "/    |\n"
+        "     |\n"
+        "=========\n",
+
+        " +---+\n"
+        " |   |\n"
+        " O   |\n"
+        "/|\\  |\n"
+        "/ \\  |\n"
+        "     |\n"
+        "=========\n"
+    };
+
+    if (errores < 0) errores = 0;
+    if (errores >= (int)estados.size()) errores = estados.size() - 1;
+    return estados[errores];
+}
+
 void* partida_jugador(void* arg) {
     Jugador* jugador = (Jugador*)arg;
     char buffer[BUFFER_SIZE];
@@ -180,14 +245,14 @@ void* partida_jugador(void* arg) {
 
         std::string respuesta;
         if (acierto) {
-            respuesta += "¡Acierto!\n";
+            respuesta += "\n" + dibujo_ahorcado(errores);
         } else {
             errores++;
-            respuesta += "¡Error!\n";
+            respuesta += "\n" + dibujo_ahorcado(errores);
         }
 
         respuesta += "Frase: " + progreso + "\n";
-        respuesta += "Errores: " + std::to_string(errores) + "/3\n";
+        respuesta += "Errores: " + std::to_string(errores) + "/" + std::to_string(max_errores) + "\n";
         respuesta += "Letras usadas: ";
         for (char c : letras_usadas) respuesta += c;
         respuesta += "\n";
@@ -214,7 +279,7 @@ void* partida_jugador(void* arg) {
 
             return nullptr;
         }
-        if (errores >= 3) {
+        if (errores >= max_errores) {
             jugador->estado = TERMINADO;
             respuesta += "Perdiste 💀\nFIN";
             jugador->tiempo_fin = std::chrono::steady_clock::now();
@@ -285,7 +350,6 @@ void mostrar_estado_listos() {
     }
 }
 
-
 void manejar_conexion(int cliente_fd) {
     char buffer[BUFFER_SIZE];
 
@@ -351,8 +415,9 @@ void manejar_conexion(int cliente_fd) {
 
         buffer[bytes] = '\0';
         std::string comando(buffer);
-
-        if (comando == "listo" || comando == "LISTO") {
+        std::transform(comando.begin(), comando.end(), comando.begin(), ::tolower);
+        
+        if (comando == "listo") {
             std::lock_guard<std::mutex> lock(mutex_jugadores);
             for (auto& j : jugadores) {
                 if (j.nickname == nickname && j.estado != LISTO) {

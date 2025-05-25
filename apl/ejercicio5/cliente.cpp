@@ -160,7 +160,15 @@ int main(int argc, char* argv[]) {
         }
 
         buffer[bytes] = '\0';
-        std::cout << "\nRespuesta del servidor:\n" << buffer << "\n";
+
+        // Limpiar consola antes de mostrar respuesta
+        #ifdef _WIN32
+            system("cls");
+        #else
+            system("clear");
+        #endif
+
+        std::cout << buffer << "\n";
 
         // Para este mini juego, el servidor enviará un mensaje de cierre
         if (std::string(buffer).find("FIN") != std::string::npos) {
