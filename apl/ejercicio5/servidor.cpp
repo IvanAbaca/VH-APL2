@@ -7,8 +7,11 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <algorithm>
+#include <fstream>
+#include <cstdlib>
+#include <ctime>
 
-#define PUERTO 5000
+#define PUERTO 5001
 #define BUFFER_SIZE 1024
 
 enum EstadoJugador {
@@ -28,11 +31,164 @@ struct Jugador {
     int socket_fd;
     std::string nickname = "(sin_nick)";
     EstadoJugador estado = ESPERANDO;
+    pthread_t thread;
 };
 
 std::vector<Jugador> jugadores;
 std::mutex mutex_jugadores;
 EstadoServidor estado_servidor = SERVIDOR_ESPERANDO_CONEXIONES;
+std::string frase_global;
+std::string archivo_frases;
+
+std::vector<std::string> cargar_frases(const std::string& archivo) {
+    std::ifstream file(archivo);
+    std::vector<std::string> frases;
+    std::string linea;
+
+    while (std::getline(file, linea)) {
+        if (!linea.empty())
+            frases.push_back(linea);
+    }
+
+    return frases;
+}
+
+void* partida_jugador(void* arg) {
+    Jugador* jugador = (Jugador*)arg;
+    char buffer[BUFFER_SIZE];
+
+    std::cout << "Comenzando partida para jugador '" << jugador->nickname << "'...\n";
+
+    std::string frase = frase_global;
+    std::string progreso;
+    for (char c : frase_global) {
+        progreso += (c == ' ') ? ' ' : '_';
+    }
+    int errores = 0;
+    std::vector<char> letras_usadas;
+
+    while (true) {
+        int bytes = recv(jugador->socket_fd, buffer, 1, 0);
+
+        if (bytes <= 0) {
+            std::cerr << "Jugador '" << jugador->nickname << "' se desconectó durante la partida.\n";
+            std::lock_guard<std::mutex> lock(mutex_jugadores);
+            jugador->estado = DESCONECTADO;
+            close(jugador->socket_fd);
+            return nullptr;
+        }
+
+        char letra = std::tolower(buffer[0]);
+
+        // Evitar repetir letras
+        if (std::find(letras_usadas.begin(), letras_usadas.end(), letra) != letras_usadas.end()) {
+            std::string msg = "Letra ya usada.\n";
+            send(jugador->socket_fd, msg.c_str(), msg.size(), 0);
+            return nullptr;
+        }
+
+        letras_usadas.push_back(letra);
+        bool acierto = false;
+
+        for (size_t i = 0; i < frase.size(); ++i) {
+            if (frase[i] == letra) {
+                progreso[i] = letra;
+                acierto = true;
+            }
+        }
+
+        std::string respuesta;
+        if (acierto) {
+            respuesta += "¡Acierto!\n";
+        } else {
+            errores++;
+            respuesta += "¡Error!\n";
+        }
+
+        respuesta += "Frase: " + progreso + "\n";
+        respuesta += "Errores: " + std::to_string(errores) + "/3\n";
+        respuesta += "Letras usadas: ";
+        for (char c : letras_usadas) respuesta += c;
+        respuesta += "\n";
+
+        // Fin del juego
+        if (progreso == frase) {
+            jugador->estado = TERMINADO;
+            respuesta += "Ganaste 🎉\nFIN";
+            send(jugador->socket_fd, respuesta.c_str(), respuesta.size(), 0);
+            close(jugador->socket_fd);
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_jugadores);
+
+                bool todos_finalizados = std::all_of(jugadores.begin(), jugadores.end(),
+                    [](const Jugador& j) {
+                        return j.estado == TERMINADO || j.estado == DESCONECTADO;
+                    });
+
+                if (todos_finalizados) {
+                    estado_servidor = SERVIDOR_ENVIANDO_RESULTADOS;
+                    std::cout << "\n📊 Resultados finales:\n";
+                    for (const auto& j : jugadores) {
+                        std::string estado_str;
+                        switch (j.estado) {
+                            case TERMINADO: estado_str = "Terminó"; break;
+                            case DESCONECTADO: estado_str = "Desconectado"; break;
+                            default: estado_str = "Otro"; break;
+                        }
+                        std::cout << " - " << j.nickname << ": " << estado_str << "\n";
+                    }
+
+                    std::cout << "\n♻️ Reiniciando servidor para nueva partida...\n";
+                    jugadores.clear();
+                    estado_servidor = SERVIDOR_ESPERANDO_CONEXIONES;
+                }
+            }
+
+            return nullptr;
+        }
+        if (errores >= 3) {
+            jugador->estado = TERMINADO;
+            respuesta += "Perdiste 💀\nFIN";
+            send(jugador->socket_fd, respuesta.c_str(), respuesta.size(), 0);
+            close(jugador->socket_fd);
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_jugadores);
+
+                bool todos_finalizados = std::all_of(jugadores.begin(), jugadores.end(),
+                    [](const Jugador& j) {
+                        return j.estado == TERMINADO || j.estado == DESCONECTADO;
+                    });
+
+                if (todos_finalizados) {
+                    estado_servidor = SERVIDOR_ENVIANDO_RESULTADOS;
+                    std::cout << "\n📊 Resultados finales:\n";
+                    for (const auto& j : jugadores) {
+                        std::string estado_str;
+                        switch (j.estado) {
+                            case TERMINADO: estado_str = "Terminó"; break;
+                            case DESCONECTADO: estado_str = "Desconectado"; break;
+                            default: estado_str = "Otro"; break;
+                        }
+                        std::cout << " - " << j.nickname << ": " << estado_str << "\n";
+                    }
+
+                    std::cout << "\n♻️ Reiniciando servidor para nueva partida...\n";
+                    jugadores.clear();
+                    estado_servidor = SERVIDOR_ESPERANDO_CONEXIONES;
+                }
+            }
+
+            return nullptr;
+        }
+
+        // Enviar avance
+        send(jugador->socket_fd, respuesta.c_str(), respuesta.size(), 0);
+    }
+
+    return nullptr;
+}
 
 void manejar_conexion(int cliente_fd) {
     char buffer[BUFFER_SIZE];
@@ -99,6 +255,31 @@ void manejar_conexion(int cliente_fd) {
                 if (!jugadores.empty() && total_listos == (int)jugadores.size()) {
                     estado_servidor = SERVIDOR_JUGANDO;
                     std::cout << "Todos los jugadores restantes están listos. ¡La partida comienza!\n";
+
+                    std::vector<std::string> frases = cargar_frases(archivo_frases);
+                    if (frases.empty()) {
+                        std::cerr << "El archivo de frases está vacío.\n";
+                        exit(1);
+                    }
+
+                    srand(time(nullptr));
+                    frase_global = frases[rand() % frases.size()];
+                    std::cout << "Frase seleccionada: " << frase_global << "\n";
+
+                    for (auto& j : jugadores) {
+                        const char* aviso = "PARTIDA_INICIADA\n";
+                        send(j.socket_fd, aviso, strlen(aviso), 0);
+                    }
+
+                    for (auto& j : jugadores) {
+                        if (j.estado == LISTO) {
+                            j.estado = JUGANDO;
+                            pthread_t hilo;
+                            pthread_create(&hilo, nullptr, partida_jugador, &j);
+                            j.thread = hilo; // opcional, si querés guardarlo
+                            pthread_detach(hilo); // no vamos a hacer join
+                        }
+                    }
                 }
             }
 
@@ -124,8 +305,32 @@ void manejar_conexion(int cliente_fd) {
                     if (total_listos == (int)jugadores.size()) {
                         estado_servidor = SERVIDOR_JUGANDO;
                         std::cout << "Todos los jugadores están listos. ¡La partida comienza!\n";
-                    }
 
+                        std::vector<std::string> frases = cargar_frases(archivo_frases);
+                        if (frases.empty()) {
+                            std::cerr << "El archivo de frases está vacío.\n";
+                            exit(1);
+                        }
+
+                        srand(time(nullptr));
+                        frase_global = frases[rand() % frases.size()];
+                        std::cout << "Frase seleccionada: " << frase_global << "\n";
+
+                        for (auto& j : jugadores) {
+                            const char* aviso = "PARTIDA_INICIADA\n";
+                            send(j.socket_fd, aviso, strlen(aviso), 0);
+                        }
+
+                        for (auto& j : jugadores) {
+                            if (j.estado == LISTO) {
+                                j.estado = JUGANDO;
+                                pthread_t hilo;
+                                pthread_create(&hilo, nullptr, partida_jugador, &j);
+                                j.thread = hilo; // opcional, si querés guardarlo
+                                pthread_detach(hilo); // no vamos a hacer join
+                            }
+                        }
+                    }
                     break;
                 }
             }
@@ -140,7 +345,13 @@ void manejar_conexion(int cliente_fd) {
     // IMPORTANTE: no cerramos el socket, se mantiene para la partida futura
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    if (argc != 3 || std::string(argv[1]) != "--archivo") {
+        std::cerr << "Uso: " << argv[0] << " --archivo <archivo_frases>\n";
+        return 1;
+    }
+    archivo_frases = argv[2];
+
     int servidor_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (servidor_fd == -1) {
         std::cerr << "Error al crear socket\n";

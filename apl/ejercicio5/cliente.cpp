@@ -4,7 +4,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define PUERTO 5000
+#define PUERTO 5001
 #define BUFFER_SIZE 1024
 
 int main(int argc, char* argv[]) {
@@ -66,8 +66,49 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    bytes = recv(cliente_fd, buffer, BUFFER_SIZE - 1, 0);
+    if (bytes <= 0) {
+        std::cerr << "Se perdió la conexión antes de que empiece la partida.\n";
+        close(cliente_fd);
+        return 1;
+    }
+    buffer[bytes] = '\0';
+    std::string mensaje(buffer);
+
+    if (mensaje.find("PARTIDA_INICIADA") == std::string::npos) {
+        std::cerr << "Mensaje inesperado del servidor: " << mensaje << "\n";
+        close(cliente_fd);
+        return 1;
+    }
+
+    std::cout << "\n🎮 ¡La partida ha comenzado!\n";
+
     // El socket permanece abierto para futuro juego
-    pause(); // simula espera de partida
+    while (true) {
+        std::string input;
+        std::cout << "Ingresá una letra: ";
+        std::getline(std::cin, input);
+
+        if (input.empty()) continue;
+
+        char letra = input[0];
+        send(cliente_fd, &letra, 1, 0);
+
+        char buffer[BUFFER_SIZE];
+        int bytes = recv(cliente_fd, buffer, BUFFER_SIZE - 1, 0);
+        if (bytes <= 0) {
+            std::cout << "Conexión cerrada por el servidor.\n";
+            break;
+        }
+
+        buffer[bytes] = '\0';
+        std::cout << "\nRespuesta del servidor:\n" << buffer << "\n";
+
+        // Para este mini juego, el servidor enviará un mensaje de cierre
+        if (std::string(buffer).find("FIN") != std::string::npos) {
+            break;
+        }
+    }
 
     close(cliente_fd);
     return 0;
