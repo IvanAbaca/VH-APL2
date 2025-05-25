@@ -3,8 +3,13 @@
 #include <unistd.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <algorithm>
 
 #define BUFFER_SIZE 1024
+
+bool es_entero(const std::string& s) {
+    return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
+}
 
 void mostrar_ayuda() {
     std::cout << "Uso: ./cliente [opciones]\n"
@@ -18,6 +23,7 @@ void mostrar_ayuda() {
 int main(int argc, char* argv[]) {
     std::string nickname, ip_servidor;
     int puerto = -1;
+    bool nickname_set = false, puerto_set = false, ip_set = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -27,24 +33,40 @@ int main(int argc, char* argv[]) {
             return 0;
         } else if ((arg == "-n" || arg == "--nickname") && i + 1 < argc) {
             nickname = argv[++i];
+            nickname_set = true;
         } else if ((arg == "-p" || arg == "--puerto") && i + 1 < argc) {
-            puerto = std::stoi(argv[++i]);
+            std::string valor = argv[++i];
+            if (!es_entero(valor)) {
+                std::cerr << "Error: el puerto debe ser un número entero.\n";
+                return 1;
+            }
+            puerto = std::stoi(valor);
+            puerto_set = true;
         } else if ((arg == "-s" || arg == "--servidor") && i + 1 < argc) {
             ip_servidor = argv[++i];
+            ip_set = true;
         } else {
-            std::cerr << "Parámetro no reconocido: " << arg << "\n";
+            std::cerr << "Parámetro no reconocido o incompleto: " << arg << "\n";
             mostrar_ayuda();
             return 1;
         }
     }
 
-    if (nickname.empty() || ip_servidor.empty() || puerto <= 0) {
+    if (!nickname_set || !puerto_set || !ip_set) {
         std::cerr << "Faltan parámetros requeridos.\n\n";
         mostrar_ayuda();
         return 1;
     }
 
-    // 🔽 A partir de acá va tu código actual pero usando las variables nickname, puerto, ip_servidor
+    if (puerto <= 0 || puerto > 65535) {
+        std::cerr << "Error: el puerto debe estar entre 1 y 65535.\n";
+        return 1;
+    }
+
+    if (nickname.empty()) {
+        std::cerr << "Error: el nickname no puede estar vacío.\n";
+        return 1;
+    }
 
     int cliente_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (cliente_fd == -1) {
@@ -74,7 +96,8 @@ int main(int argc, char* argv[]) {
         std::cout << "Servidor: " << respuesta;
 
         if (respuesta.find("Error") != std::string::npos ||
-            respuesta.find("rechazada") != std::string::npos) {
+            respuesta.find("rechazada") != std::string::npos ||
+            respuesta.find("El juego ya ha comenzado") != std::string::npos) {
             std::cout << "Conexión finalizada.\n";
             close(cliente_fd);
             return 0;
@@ -121,9 +144,12 @@ int main(int argc, char* argv[]) {
         std::cout << "Ingresá una letra: ";
         std::getline(std::cin, input);
 
-        if (input.empty()) continue;
+        if (input.length() != 1 || !std::isalpha(input[0])) {
+            std::cout << "Entrada inválida. Ingresá una sola letra del abecedario.\n";
+            continue;
+        }
 
-        char letra = input[0];
+        char letra = std::tolower(input[0]);
         send(cliente_fd, &letra, 1, 0);
 
         char buffer[BUFFER_SIZE];

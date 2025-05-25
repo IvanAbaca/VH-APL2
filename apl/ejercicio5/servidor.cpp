@@ -38,11 +38,14 @@ struct Jugador {
     std::chrono::steady_clock::time_point tiempo_fin;
 };
 
+int puerto = -1;
+int max_usuarios = -1;
 std::vector<Jugador> jugadores;
 std::mutex mutex_jugadores;
 EstadoServidor estado_servidor = SERVIDOR_ESPERANDO_CONEXIONES;
 std::string frase_global;
 std::string archivo_frases;
+bool puerto_set = false, usuarios_set = false, archivo_set = false;
 
 std::vector<std::string> cargar_frases(const std::string& archivo) {
     std::ifstream file(archivo);
@@ -55,6 +58,59 @@ std::vector<std::string> cargar_frases(const std::string& archivo) {
     }
 
     return frases;
+}
+
+void reiniciar_servidor() {
+    std::cout << "\n♻️ Reiniciando servidor para nueva partida...\n";
+
+    jugadores.clear();
+    estado_servidor = SERVIDOR_ESPERANDO_CONEXIONES;
+}
+
+void enviar_resultados_finales() {
+    estado_servidor = SERVIDOR_ENVIANDO_RESULTADOS;
+
+    std::vector<Jugador> ranking = jugadores;
+
+    std::sort(ranking.begin(), ranking.end(), [](const Jugador& a, const Jugador& b) {
+        if (a.aciertos != b.aciertos)
+            return a.aciertos > b.aciertos;
+        auto ta = std::chrono::duration_cast<std::chrono::seconds>(a.tiempo_fin - a.tiempo_inicio).count();
+        auto tb = std::chrono::duration_cast<std::chrono::seconds>(b.tiempo_fin - b.tiempo_inicio).count();
+        return ta < tb;
+    });
+
+    std::ostringstream resultados;
+    resultados << "RESULTADOS_FINALES\n";
+
+    int posicion = 1;
+    for (const auto& j : ranking) {
+        std::string estado_str;
+        switch (j.estado) {
+            case TERMINADO: estado_str = "Terminó"; break;
+            case DESCONECTADO: estado_str = "Desconectado"; break;
+            default: estado_str = "Otro"; break;
+        }
+
+        auto duracion = std::chrono::duration_cast<std::chrono::seconds>(j.tiempo_fin - j.tiempo_inicio).count();
+
+        resultados << posicion++ << ". " << j.nickname
+                   << " | Aciertos: " << j.aciertos
+                   << " | Tiempo: " << duracion << "s"
+                   << " | Estado: " << estado_str << "\n";
+    }
+
+    std::string mensaje_final = resultados.str();
+
+    for (auto& j : jugadores) {
+        if (j.estado == TERMINADO) {
+            send(j.socket_fd, mensaje_final.c_str(), mensaje_final.size(), 0);
+            close(j.socket_fd);
+        }
+    }
+
+    std::cout << "\n📊 Resultados finales:\n" << mensaje_final;
+    reiniciar_servidor();
 }
 
 void* partida_jugador(void* arg) {
@@ -78,13 +134,31 @@ void* partida_jugador(void* arg) {
         if (bytes <= 0) {
             jugador->tiempo_fin = std::chrono::steady_clock::now();
             std::cerr << "Jugador '" << jugador->nickname << "' se desconectó durante la partida.\n";
+            
             std::lock_guard<std::mutex> lock(mutex_jugadores);
             jugador->estado = DESCONECTADO;
             close(jugador->socket_fd);
+
+            // ✅ Verificar si todos finalizaron ahora
+            bool todos_finalizados = std::all_of(jugadores.begin(), jugadores.end(),
+                [](const Jugador& j) {
+                    return j.estado == TERMINADO || j.estado == DESCONECTADO;
+                });
+
+            if (todos_finalizados) {
+                enviar_resultados_finales();
+            }
+
             return nullptr;
         }
 
         char letra = std::tolower(buffer[0]);
+        if (!std::isalpha(letra)) {
+            std::string msg = "Carácter inválido. Ingresá una letra del abecedario.\n";
+            send(jugador->socket_fd, msg.c_str(), msg.size(), 0);
+            continue;
+        }
+
 
         // Evitar repetir letras
         if (std::find(letras_usadas.begin(), letras_usadas.end(), letra) != letras_usadas.end()) {
@@ -134,54 +208,7 @@ void* partida_jugador(void* arg) {
                     });
 
                 if (todos_finalizados) {
-                    estado_servidor = SERVIDOR_ENVIANDO_RESULTADOS;
-
-                    // Armar ranking
-                    std::vector<Jugador> ranking = jugadores;
-
-                    std::sort(ranking.begin(), ranking.end(), [](const Jugador& a, const Jugador& b) {
-                        if (a.aciertos != b.aciertos)
-                            return a.aciertos > b.aciertos;
-                        auto ta = std::chrono::duration_cast<std::chrono::seconds>(a.tiempo_fin - a.tiempo_inicio).count();
-                        auto tb = std::chrono::duration_cast<std::chrono::seconds>(b.tiempo_fin - b.tiempo_inicio).count();
-                        return ta < tb;
-                    });
-
-                    std::ostringstream resultados;
-                    resultados << "RESULTADOS_FINALES\n";
-
-                    int posicion = 1;
-                    for (const auto& j : ranking) {
-                        std::string estado_str;
-                        switch (j.estado) {
-                            case TERMINADO: estado_str = "Terminó"; break;
-                            case DESCONECTADO: estado_str = "Desconectado"; break;
-                            default: estado_str = "Otro"; break;
-                        }
-
-                        auto duracion = std::chrono::duration_cast<std::chrono::seconds>(j.tiempo_fin - j.tiempo_inicio).count();
-
-                        resultados << posicion++ << ". " << j.nickname
-                                << " | Aciertos: " << j.aciertos
-                                << " | Tiempo: " << duracion << "s"
-                                << " | Estado: " << estado_str << "\n";
-                    }
-
-                    std::string mensaje_final = resultados.str();
-
-                    // Enviar a todos los jugadores que terminaron bien
-                    for (auto& j : jugadores) {
-                        if (j.estado == TERMINADO) {
-                            send(j.socket_fd, mensaje_final.c_str(), mensaje_final.size(), 0);
-                            close(j.socket_fd);
-                        }
-                    }
-
-                    std::cout << "\n📊 Resultados finales:\n" << mensaje_final;
-                    std::cout << "\n♻️ Reiniciando servidor para nueva partida...\n";
-
-                    jugadores.clear();
-                    estado_servidor = SERVIDOR_ESPERANDO_CONEXIONES;
+                    enviar_resultados_finales();
                 }
             }
 
@@ -202,54 +229,7 @@ void* partida_jugador(void* arg) {
                     });
 
                 if (todos_finalizados) {
-                    estado_servidor = SERVIDOR_ENVIANDO_RESULTADOS;
-
-                    // Armar ranking
-                    std::vector<Jugador> ranking = jugadores;
-
-                    std::sort(ranking.begin(), ranking.end(), [](const Jugador& a, const Jugador& b) {
-                        if (a.aciertos != b.aciertos)
-                            return a.aciertos > b.aciertos;
-                        auto ta = std::chrono::duration_cast<std::chrono::seconds>(a.tiempo_fin - a.tiempo_inicio).count();
-                        auto tb = std::chrono::duration_cast<std::chrono::seconds>(b.tiempo_fin - b.tiempo_inicio).count();
-                        return ta < tb;
-                    });
-
-                    std::ostringstream resultados;
-                    resultados << "RESULTADOS_FINALES\n";
-
-                    int posicion = 1;
-                    for (const auto& j : ranking) {
-                        std::string estado_str;
-                        switch (j.estado) {
-                            case TERMINADO: estado_str = "Terminó"; break;
-                            case DESCONECTADO: estado_str = "Desconectado"; break;
-                            default: estado_str = "Otro"; break;
-                        }
-
-                        auto duracion = std::chrono::duration_cast<std::chrono::seconds>(j.tiempo_fin - j.tiempo_inicio).count();
-
-                        resultados << posicion++ << ". " << j.nickname
-                                << " | Aciertos: " << j.aciertos
-                                << " | Tiempo: " << duracion << "s"
-                                << " | Estado: " << estado_str << "\n";
-                    }
-
-                    std::string mensaje_final = resultados.str();
-
-                    // Enviar a todos los jugadores que terminaron bien
-                    for (auto& j : jugadores) {
-                        if (j.estado == TERMINADO) {
-                            send(j.socket_fd, mensaje_final.c_str(), mensaje_final.size(), 0);
-                            close(j.socket_fd);
-                        }
-                    }
-
-                    std::cout << "\n📊 Resultados finales:\n" << mensaje_final;
-                    std::cout << "\n♻️ Reiniciando servidor para nueva partida...\n";
-
-                    jugadores.clear();
-                    estado_servidor = SERVIDOR_ESPERANDO_CONEXIONES;
+                    enviar_resultados_finales();
                 }
             }
 
@@ -262,6 +242,49 @@ void* partida_jugador(void* arg) {
 
     return nullptr;
 }
+
+void iniciar_partida() {
+    estado_servidor = SERVIDOR_JUGANDO;
+    std::cout << "Todos los jugadores están listos. ¡La partida comienza!\n";
+
+    std::vector<std::string> frases = cargar_frases(archivo_frases);
+    if (frases.empty()) {
+        std::cerr << "El archivo de frases está vacío.\n";
+        exit(1);
+    }
+
+    srand(time(nullptr));
+    frase_global = frases[rand() % frases.size()];
+    std::cout << "Frase seleccionada: " << frase_global << "\n";
+
+    for (auto& j : jugadores) {
+        const char* aviso = "PARTIDA_INICIADA\n";
+        send(j.socket_fd, aviso, strlen(aviso), 0);
+    }
+
+    for (auto& j : jugadores) {
+        if (j.estado == LISTO) {
+            j.estado = JUGANDO;
+            pthread_t hilo;
+            pthread_create(&hilo, nullptr, partida_jugador, &j);
+            j.thread = hilo;
+            pthread_detach(hilo);
+        }
+    }
+}
+
+void mostrar_estado_listos() {
+    int total_listos = std::count_if(jugadores.begin(), jugadores.end(),
+        [](const Jugador& j) { return j.estado == LISTO; });
+
+    std::cout << "Actualización: " << total_listos << "/" << jugadores.size()
+              << " jugadores listos\n";
+
+    if (!jugadores.empty() && total_listos == (int)jugadores.size()) {
+        iniciar_partida();
+    }
+}
+
 
 void manejar_conexion(int cliente_fd) {
     char buffer[BUFFER_SIZE];
@@ -319,41 +342,7 @@ void manejar_conexion(int cliente_fd) {
                     });
                 jugadores.erase(it, jugadores.end());
 
-                int total_listos = std::count_if(jugadores.begin(), jugadores.end(),
-                    [](const Jugador& j) { return j.estado == LISTO; });
-
-                std::cout << "Actualización: " << total_listos << "/" << jugadores.size()
-                          << " jugadores listos tras desconexión.\n";
-
-                if (!jugadores.empty() && total_listos == (int)jugadores.size()) {
-                    estado_servidor = SERVIDOR_JUGANDO;
-                    std::cout << "Todos los jugadores restantes están listos. ¡La partida comienza!\n";
-
-                    std::vector<std::string> frases = cargar_frases(archivo_frases);
-                    if (frases.empty()) {
-                        std::cerr << "El archivo de frases está vacío.\n";
-                        exit(1);
-                    }
-
-                    srand(time(nullptr));
-                    frase_global = frases[rand() % frases.size()];
-                    std::cout << "Frase seleccionada: " << frase_global << "\n";
-
-                    for (auto& j : jugadores) {
-                        const char* aviso = "PARTIDA_INICIADA\n";
-                        send(j.socket_fd, aviso, strlen(aviso), 0);
-                    }
-
-                    for (auto& j : jugadores) {
-                        if (j.estado == LISTO) {
-                            j.estado = JUGANDO;
-                            pthread_t hilo;
-                            pthread_create(&hilo, nullptr, partida_jugador, &j);
-                            j.thread = hilo; // opcional, si querés guardarlo
-                            pthread_detach(hilo); // no vamos a hacer join
-                        }
-                    }
-                }
+                mostrar_estado_listos();
             }
 
             close(cliente_fd);
@@ -369,41 +358,7 @@ void manejar_conexion(int cliente_fd) {
                 if (j.nickname == nickname && j.estado != LISTO) {
                     j.estado = LISTO;
 
-                    int total_listos = std::count_if(jugadores.begin(), jugadores.end(),
-                        [](const Jugador& j) { return j.estado == LISTO; });
-
-                    std::cout << "Jugador '" << nickname << "' está LISTO (" 
-                              << total_listos << "/" << jugadores.size() << ")\n";
-
-                    if (total_listos == (int)jugadores.size()) {
-                        estado_servidor = SERVIDOR_JUGANDO;
-                        std::cout << "Todos los jugadores están listos. ¡La partida comienza!\n";
-
-                        std::vector<std::string> frases = cargar_frases(archivo_frases);
-                        if (frases.empty()) {
-                            std::cerr << "El archivo de frases está vacío.\n";
-                            exit(1);
-                        }
-
-                        srand(time(nullptr));
-                        frase_global = frases[rand() % frases.size()];
-                        std::cout << "Frase seleccionada: " << frase_global << "\n";
-
-                        for (auto& j : jugadores) {
-                            const char* aviso = "PARTIDA_INICIADA\n";
-                            send(j.socket_fd, aviso, strlen(aviso), 0);
-                        }
-
-                        for (auto& j : jugadores) {
-                            if (j.estado == LISTO) {
-                                j.estado = JUGANDO;
-                                pthread_t hilo;
-                                pthread_create(&hilo, nullptr, partida_jugador, &j);
-                                j.thread = hilo; // opcional, si querés guardarlo
-                                pthread_detach(hilo); // no vamos a hacer join
-                            }
-                        }
-                    }
+                    mostrar_estado_listos();
                     break;
                 }
             }
@@ -418,9 +373,6 @@ void manejar_conexion(int cliente_fd) {
     // IMPORTANTE: no cerramos el socket, se mantiene para la partida futura
 }
 
-int puerto = -1;
-int max_usuarios = -1;
-
 void mostrar_ayuda() {
     std::cout << "Uso: ./servidor [opciones]\n"
               << "Opciones:\n"
@@ -428,6 +380,10 @@ void mostrar_ayuda() {
               << "  -u  --usuarios <cantidad>   Cantidad máxima de usuarios (requerido)\n"
               << "  -a  --archivo <archivo>     Archivo de frases (requerido)\n"
               << "  -h  --help                  Muestra esta ayuda\n";
+}
+
+bool es_entero(const std::string& s) {
+    return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
 int main(int argc, char* argv[]) {
@@ -438,24 +394,54 @@ int main(int argc, char* argv[]) {
             mostrar_ayuda();
             return 0;
         } else if ((arg == "-p" || arg == "--puerto") && i + 1 < argc) {
-            puerto = std::stoi(argv[++i]);
+            std::string valor = argv[++i];
+            if (!es_entero(valor)) {
+                std::cerr << "Error: el puerto debe ser un número entero.\n";
+                return 1;
+            }
+            puerto = std::stoi(valor);
+            puerto_set = true;
         } else if ((arg == "-u" || arg == "--usuarios") && i + 1 < argc) {
-            max_usuarios = std::stoi(argv[++i]);
+            std::string valor = argv[++i];
+            if (!es_entero(valor)) {
+                std::cerr << "Error: la cantidad de usuarios debe ser un número entero.\n";
+                return 1;
+            }
+            max_usuarios = std::stoi(valor);
+            usuarios_set = true;
         } else if ((arg == "-a" || arg == "--archivo") && i + 1 < argc) {
             archivo_frases = argv[++i];
+            archivo_set = true;
         } else {
-            std::cerr << "Parámetro no reconocido: " << arg << "\n";
+            std::cerr << "Parámetro no reconocido o incompleto: " << arg << "\n";
             mostrar_ayuda();
             return 1;
         }
     }
 
-    // Validaciones
-    if (puerto <= 0 || archivo_frases.empty() || max_usuarios <= 0) {
-        std::cerr << "Faltan parámetros requeridos o son inválidos.\n\n";
+    // Validaciones finales
+    if (!puerto_set || !usuarios_set || !archivo_set) {
+        std::cerr << "Faltan parámetros requeridos.\n\n";
         mostrar_ayuda();
         return 1;
     }
+
+    if (puerto <= 0 || puerto > 65535) {
+        std::cerr << "Error: el puerto debe estar entre 1 y 65535.\n";
+        return 1;
+    }
+
+    if (max_usuarios <= 0) {
+        std::cerr << "Error: la cantidad de usuarios debe ser mayor a cero.\n";
+        return 1;
+    }
+
+    std::ifstream prueba(archivo_frases);
+    if (!prueba.is_open()) {
+        std::cerr << "Error: no se pudo abrir el archivo de frases: " << archivo_frases << "\n";
+        return 1;
+    }
+    prueba.close();
 
     int servidor_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (servidor_fd == -1) {
