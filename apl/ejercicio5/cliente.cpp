@@ -106,6 +106,25 @@ int main(int argc, char* argv[]) {
 
         // Para este mini juego, el servidor enviará un mensaje de cierre
         if (std::string(buffer).find("FIN") != std::string::npos) {
+            std::cout << "Esperando resultados finales...\n";
+
+            // Esperar mensaje final del servidor
+            char final_buffer[BUFFER_SIZE * 4]; // por si es largo
+            int final_bytes = recv(cliente_fd, final_buffer, sizeof(final_buffer) - 1, 0);
+            if (final_bytes > 0) {
+                final_buffer[final_bytes] = '\0';
+                std::string final_msg(final_buffer);
+
+                if (final_msg.rfind("RESULTADOS_FINALES\n", 0) == 0) { // empieza con...
+                    std::cout << "\n📊 Resultados:\n";
+                    std::cout << final_msg.substr(std::string("RESULTADOS_FINALES\n").length()) << "\n";
+                } else {
+                    std::cerr << "Mensaje de resultados no reconocido:\n" << final_msg << "\n";
+                }
+            } else {
+                std::cerr << "No se pudieron recibir los resultados finales.\n";
+            }
+
             break;
         }
     }

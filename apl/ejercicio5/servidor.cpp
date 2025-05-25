@@ -10,6 +10,7 @@
 #include <fstream>
 #include <cstdlib>
 #include <ctime>
+#include <sstream>
 
 #define PUERTO 5001
 #define BUFFER_SIZE 1024
@@ -32,6 +33,9 @@ struct Jugador {
     std::string nickname = "(sin_nick)";
     EstadoJugador estado = ESPERANDO;
     pthread_t thread;
+    int aciertos = 0;
+    std::chrono::steady_clock::time_point tiempo_inicio;
+    std::chrono::steady_clock::time_point tiempo_fin;
 };
 
 std::vector<Jugador> jugadores;
@@ -59,6 +63,7 @@ void* partida_jugador(void* arg) {
 
     std::cout << "Comenzando partida para jugador '" << jugador->nickname << "'...\n";
 
+    jugador->tiempo_inicio = std::chrono::steady_clock::now();
     std::string frase = frase_global;
     std::string progreso;
     for (char c : frase_global) {
@@ -94,6 +99,7 @@ void* partida_jugador(void* arg) {
             if (frase[i] == letra) {
                 progreso[i] = letra;
                 acierto = true;
+                if (acierto) jugador->aciertos++;
             }
         }
 
@@ -115,8 +121,8 @@ void* partida_jugador(void* arg) {
         if (progreso == frase) {
             jugador->estado = TERMINADO;
             respuesta += "Ganaste 🎉\nFIN";
+            jugador->tiempo_fin = std::chrono::steady_clock::now();
             send(jugador->socket_fd, respuesta.c_str(), respuesta.size(), 0);
-            close(jugador->socket_fd);
 
             {
                 std::lock_guard<std::mutex> lock(mutex_jugadores);
@@ -150,8 +156,8 @@ void* partida_jugador(void* arg) {
         if (errores >= 3) {
             jugador->estado = TERMINADO;
             respuesta += "Perdiste 💀\nFIN";
+            jugador->tiempo_fin = std::chrono::steady_clock::now();
             send(jugador->socket_fd, respuesta.c_str(), respuesta.size(), 0);
-            close(jugador->socket_fd);
 
             {
                 std::lock_guard<std::mutex> lock(mutex_jugadores);
@@ -163,18 +169,51 @@ void* partida_jugador(void* arg) {
 
                 if (todos_finalizados) {
                     estado_servidor = SERVIDOR_ENVIANDO_RESULTADOS;
-                    std::cout << "\n📊 Resultados finales:\n";
-                    for (const auto& j : jugadores) {
+
+                    // Armar ranking
+                    std::vector<Jugador> ranking = jugadores;
+
+                    std::sort(ranking.begin(), ranking.end(), [](const Jugador& a, const Jugador& b) {
+                        if (a.aciertos != b.aciertos)
+                            return a.aciertos > b.aciertos;
+                        auto ta = std::chrono::duration_cast<std::chrono::seconds>(a.tiempo_fin - a.tiempo_inicio).count();
+                        auto tb = std::chrono::duration_cast<std::chrono::seconds>(b.tiempo_fin - b.tiempo_inicio).count();
+                        return ta < tb;
+                    });
+
+                    std::ostringstream resultados;
+                    resultados << "RESULTADOS_FINALES\n";
+
+                    int posicion = 1;
+                    for (const auto& j : ranking) {
                         std::string estado_str;
                         switch (j.estado) {
                             case TERMINADO: estado_str = "Terminó"; break;
                             case DESCONECTADO: estado_str = "Desconectado"; break;
                             default: estado_str = "Otro"; break;
                         }
-                        std::cout << " - " << j.nickname << ": " << estado_str << "\n";
+
+                        auto duracion = std::chrono::duration_cast<std::chrono::seconds>(j.tiempo_fin - j.tiempo_inicio).count();
+
+                        resultados << posicion++ << ". " << j.nickname
+                                << " | Aciertos: " << j.aciertos
+                                << " | Tiempo: " << duracion << "s"
+                                << " | Estado: " << estado_str << "\n";
                     }
 
+                    std::string mensaje_final = resultados.str();
+
+                    // Enviar a todos los jugadores que terminaron bien
+                    for (auto& j : jugadores) {
+                        if (j.estado == TERMINADO) {
+                            send(j.socket_fd, mensaje_final.c_str(), mensaje_final.size(), 0);
+                            close(j.socket_fd);
+                        }
+                    }
+
+                    std::cout << "\n📊 Resultados finales:\n" << mensaje_final;
                     std::cout << "\n♻️ Reiniciando servidor para nueva partida...\n";
+
                     jugadores.clear();
                     estado_servidor = SERVIDOR_ESPERANDO_CONEXIONES;
                 }
