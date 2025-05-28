@@ -62,18 +62,40 @@ int crearHijo1(){
         //VUELVO AL PADRE
         return pid;
     }else{
-        cout << "Hubo error" << endl;
+        cout << "Hubo error al crear hijo1" << endl;
+    }
+    return 0;
+}
+
+int crearHijo2(){
+    pid_t pid = fork();
+    if(pid == 0){
+        imprimirMensaje("HIJO2", "    ");
+        pid_t piddem = fork();
+        if(piddem == 0){
+            //SOY DEMONIO
+            imprimirMensaje("QUE SE CONVERTIRÁ EN DEMONIO", "    ");
+            sleep(20);
+        }else if(piddem > 0){
+            //SOY HIJO2 Y TERMINO SIN ESPERAR AL DEMONIO
+            exit(EXIT_SUCCESS);
+        }else{
+            cout << "Hubo error al crear demonio" << endl;
+        }
     }
     return 0;
 }
 
 int main(){
     int status;
+    imprimirMensaje("PADRE","");
     int pid = crearHijo1();
     if(pid > 0){
-        //ES PADRE
-        imprimirMensaje("PADRE","");
-        waitpid(pid, &status, 0);
+        waitpid(pid,&status,0);
+        crearHijo2();
+        getchar(); // Espera para que el padre no termine inmediatamente
     }
+        
+    wait(&status);
     return EXIT_SUCCESS;
 }
