@@ -6,6 +6,20 @@
 
 using namespace std;
 
+
+void mostrar_ayuda() {
+    cout << "Ejercicio1: arbol de procesos\n"
+        << "Opciones:\n"
+        << "  -h  --help                  Muestra esta ayuda\n\n"
+        <<"Importante: Las pausas pueden evitarse al presionar una tecla en la consola.\n\n"
+        <<"Se muestra en un primer lugar la rama del hijo1, "
+        <<"con una pausa para acceder al arbol de procesos (con ps -fea).\n"
+        << " Luego se muestra la rama del hijo2 con una pausa, y al finalizar se puede observar"
+        << " el arbol de procesos para ver al demonio creado.\n"
+    << endl;
+}
+
+
 void imprimirMensaje(const string& nombre, const string& tabulation){
     cout << tabulation << "Soy el proceso " << nombre << " con PID=" << getpid() << ", mi padre es " << getppid() << endl;
 }
@@ -86,7 +100,11 @@ int crearHijo2(){
     return 0;
 }
 
-int main(){
+int main(int argc, char* argv[]) {
+    if(argc > 1 && (string(argv[1]) == "-h" || string(argv[1]) == "--help")){
+        mostrar_ayuda();
+        return EXIT_SUCCESS;
+    }
     int status;
     imprimirMensaje("PADRE","");
     int pid = crearHijo1();
