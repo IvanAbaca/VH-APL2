@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <csignal>
 
 #define FIFO_IMPRESION "/tmp/cola_impresion"
 #define LOG_PATH "/tmp/impresiones.log"
@@ -21,6 +22,10 @@ enum Estado {
     ARCHIVO_NO_ENCONTRADO,
     ARCHIVO_VACIO
 };
+
+// Variables globales para limpieza
+int fd_impresion = -1;
+ofstream logger;
 
 // Función para mostrar ayuda
 void mostrar_ayuda(const char* nombre_programa) {
@@ -44,20 +49,36 @@ void limpiar_archivos() {
     ofstream out(LOG_PATH, ios::trunc); // Trunca el archivo log
 }
 
+//Manejador de señal
+void limpiar_y_salir(int signo) {
+    if (fd_impresion != -1) {
+        close(fd_impresion);
+    }
+
+    if (logger.is_open()) {
+        logger << "Servidor finalizado por señal " << signo << " el día " << obtener_timestamp() << "\n";
+        logger.close();
+    }
+
+    unlink(FIFO_IMPRESION);
+    cout << "\nServidor interrumpido (señal " << signo << "). Archivos limpiados.\n";
+    exit(EXIT_SUCCESS);
+}
+
 // Función para registrar impresión
-void registrar_en_log(ofstream& log, pid_t pid, const string& archivo, Estado estado, const string& contenido = "") {
+void registrar_en_log(ofstream& logger, pid_t pid, const string& archivo, Estado estado, const string& contenido = "") {
     string mensaje =  "PID " + to_string(pid) + " imprimió el archivo " + archivo + " el día " + obtener_timestamp() + "\n";
-    log << mensaje;
+    logger << mensaje;
     cout << mensaje;
     if (estado == OK) {
-        log << contenido << "\n";
+        logger << contenido << "\n";
     } else if (estado == ARCHIVO_NO_ENCONTRADO) {
-        log << "ERROR: Archivo no encontrado.\n";
+        logger << "ERROR: Archivo no encontrado.\n";
     } else if (estado == ARCHIVO_VACIO) {
-        log << "ERROR: Archivo vacío.\n";
+        logger << "ERROR: Archivo vacío.\n";
     }
-    log << "-----------------------------------------\n";
-    log.flush();
+    logger << "-----------------------------------------\n";
+    logger.flush();
 }
 
 // Función para enviar respuesta al cliente
@@ -74,8 +95,11 @@ void responder_a_cliente(pid_t pid, Estado estado) {
 }
 
 int main(int argc, char* argv[]) {
-    // --- Parseo de argumentos ---
+    // Registrar señales
+    signal(SIGINT, limpiar_y_salir);
+    signal(SIGTERM, limpiar_y_salir);
 
+    // --- Parseo de argumentos ---
     if(argc == 1){
         mostrar_ayuda(argv[0]);
         return EXIT_SUCCESS;
@@ -105,8 +129,8 @@ int main(int argc, char* argv[]) {
     limpiar_archivos();
     mkfifo(FIFO_IMPRESION, 0666);
 
-    ofstream log(LOG_PATH, ios::app);
-    if (!log.is_open()) {
+    logger.open(LOG_PATH, ios::app);
+    if (!logger.is_open()) {
         cerr << "No se pudo abrir el log de impresiones.\n";
         return EXIT_FAILURE;
     }
@@ -154,7 +178,7 @@ int main(int argc, char* argv[]) {
             contenido = ss.str();
         }
 
-        registrar_en_log(log, pid, path_archivo, estado, contenido);
+        registrar_en_log(logger, pid, path_archivo, estado, contenido);
         responder_a_cliente(pid, estado);
 
         trabajos_procesados++;
