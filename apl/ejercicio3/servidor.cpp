@@ -89,8 +89,8 @@ void responder_a_cliente(pid_t pid, Estado estado) {
         cerr << "No se pudo abrir FIFO del cliente: " << path_fifo_cliente << endl;
         return;
     }
-
-    write(fd_cliente, to_string(estado).c_str(), sizeof(estado));
+    string msg = to_string(estado);
+    write(fd_cliente, msg.c_str(), msg.size());
     close(fd_cliente);
 }
 
@@ -138,7 +138,7 @@ int main(int argc, char* argv[]) {
     cout << "Servidor iniciado. Esperando " << cantidad_trabajos << " trabajos...\n";
 
     // --- Bucle principal ---
-    int fd_impresion = open(FIFO_IMPRESION, O_RDONLY);
+    fd_impresion = open(FIFO_IMPRESION, O_RDONLY);
     if (fd_impresion == -1) {
         cerr << "Error al abrir FIFO de impresión\n";
         return EXIT_FAILURE;
@@ -157,7 +157,10 @@ int main(int argc, char* argv[]) {
 
         // Espera formato "PID:/ruta/archivo"
         size_t sep = mensaje.find(':');
-        if (sep == string::npos) continue;
+        if (sep == string::npos) {
+            logger << "Mensaje inválido recibido: " << mensaje << "\n";
+            continue;
+        }
 
         pid_t pid = stoi(mensaje.substr(0, sep));
         string path_archivo = mensaje.substr(sep + 1);
@@ -166,7 +169,7 @@ int main(int argc, char* argv[]) {
         Estado estado;
         string contenido;
 
-        if (!fs::exists(path_archivo)) {
+        if (!fs::is_regular_file(path_archivo)) {
             estado = ARCHIVO_NO_ENCONTRADO;
         } else if (fs::is_empty(path_archivo)) {
             estado = ARCHIVO_VACIO;

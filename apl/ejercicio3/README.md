@@ -6,6 +6,7 @@
 ./servidor --impresiones
 ./servidor --impresiones -3
 
+# Casos exitosos
+./servidor -i 3
 
-cat /tmp/impresiones.log
-cat /tmp/cola_impresion
+./cliente - a /home/marcopalmieri/documents/APL2/VH-APL2/apl/ejercicio3/archivos/arch1.txt
