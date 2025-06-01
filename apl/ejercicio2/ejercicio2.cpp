@@ -19,28 +19,25 @@
 #include <vector>
 #include <condition_variable>
 #include <queue>
+#include <chrono>
+#include <map>  // para el resumen
 
 using namespace std;
 namespace fs = std::filesystem;
 
-const int GENERADORES = 3;
+// -------- Constantes y variables globales ------------
 const int BUFFER_SIZE = 10;
-std::mutex mtx_buffer;
-std::condition_variable cv_buffer_not_full;
-std::queue<std::string> buffer;
+std::mutex mtx_buffer; // mutex para proteger el acceso al buffer
+std::condition_variable cv_buffer_not_full; // condición para esperar a que el buffer no esté lleno
+std::condition_variable cv_buffer_not_empty; // condición para esperar a que el buffer no esté vacío
+std::queue<std::string> buffer; // buffer para almacenar los nombres de archivos generados
 std::atomic<int> id_global{1};               // contador global de IDs
 std::atomic<int> paquetes_generados{0};  // contador de paquetes generados
+std::mutex mtx_resultados; // mutex para proteger el acceso a los resultados
+std::map<int, double> peso_por_sucursal; // acumulador de peso para el resumen por sucursal
+std::atomic<bool> produccion_finalizada{false}; // bandera para indicar si la producción ha finalizado
+std::atomic<int> paquetes_consumidos{0}; // contador de paquetes consumidos
 
-// -------- Ayuda y parámetros por línea de comandos ------------
-void mostrar_ayuda() {
-    std::cout << "Uso: ./ejercicio2 [opciones]\n"
-              << "Opciones:\n"
-              << "  -d  --directorio <path>         Ruta del directorio a analizar (requerido)\n"
-              << "  -g  --generadores <número>      Cantidad de threads a ejecutar concurrentemente para generar los archivos del directorio (Requerido)\n"
-              << "  -c  --consumidores <número>     Cantidad de threads a ejecutar concurrentemente para procesar los archivos del directorio (Requerido)\n"
-              << "  -p  --paquetes <número>         Cantidad de paquetes a generar (Requerido).\n"
-              << "  -h  --help                      Muestra esta ayuda\n";
-}
 
 struct Args {
     std::string dir;
@@ -51,6 +48,17 @@ struct Args {
 
 bool es_entero(const std::string& s) {
     return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
+}
+
+// -------- Ayuda y parámetros por línea de comandos ------------
+void mostrar_ayuda() {
+    std::cout << "Uso: ./ejercicio2 [opciones]\n"
+              << "Opciones:\n"
+              << "  -d  --directorio <path>         Ruta del directorio a analizar (requerido)\n"
+              << "  -g  --generadores <número>      Cantidad de threads a ejecutar concurrentemente para generar los archivos del directorio (Requerido)\n"
+              << "  -c  --consumidores <número>     Cantidad de threads a ejecutar concurrentemente para procesar los archivos del directorio (Requerido)\n"
+              << "  -p  --paquetes <número>         Cantidad de paquetes a generar (Requerido).\n"
+              << "  -h  --help                      Muestra esta ayuda\n";
 }
 
 // -------- Inicialización y limpieza de directorio ------------
@@ -105,18 +113,9 @@ void generador(int total_paquetes, string path_directorio) {
         contenido << id_paquete << ";" << std::fixed << std::setprecision(2)
                   << peso << ";" << destino;
 
-        std::string nombre_archivo = path_directorio + "/" + std::to_string(id_paquete) + ".paq";
-
-        // esperar a que haya espacio en el buffer y bloquear el mutex
-        std::unique_lock<std::mutex> lock(mtx_buffer);
-        cv_buffer_not_full.wait(lock, [] {
-            return buffer.size() < BUFFER_SIZE;
-        });
-
-        // Simular escritura al buffer (push del archivo)
-        buffer.push(nombre_archivo);
 
         // crear el archivo con el contenido generado
+        std::string nombre_archivo = path_directorio + "/" + std::to_string(id_paquete) + ".paq";
         std::ofstream archivo(nombre_archivo);
         if (archivo.is_open()) {
             archivo << contenido.str() << "\n";
@@ -124,14 +123,87 @@ void generador(int total_paquetes, string path_directorio) {
             paquetes_generados.fetch_add(1);
         } else {
             std::cerr << "Error al crear archivo: " << nombre_archivo << std::endl;
+            continue; // No continuar si no se pudo escribir
         }
 
-        //libero el mutex del buffer :)
-        lock.unlock();
-        
-        //esto es para notificar a los consumidores que hay un nuevo paquete disponible -- ver si es necesario
-        // cv_buffer_not_full.notify_all(); 
-        
+        // esperar a que haya espacio en el buffer y bloquear el mutex
+        std::unique_lock<std::mutex> lock(mtx_buffer);
+        cv_buffer_not_full.wait(lock, [] {
+            return buffer.size() < BUFFER_SIZE;
+        });
+
+        // poner el archivo en el buffer
+        buffer.push(nombre_archivo);
+
+        lock.unlock(); // desbloquear el mutex
+        cv_buffer_not_empty.notify_one(); //notificar a los consumidores que hay un archivo nuevo en el buffer
+    }
+}
+
+// -------- Threads Consumidores ------------
+void consumidor(const std::string& path_directorio, std::map<int, std::pair<int, double>>& resumen_sucursal, std::mutex& mtx_resumen)
+{
+    while (true) {
+        std::string archivo_path;
+
+        // Espera y saca del buffer
+        {
+            std::unique_lock<std::mutex> lock(mtx_buffer);
+            cv_buffer_not_empty.wait(lock, [] {
+                return !buffer.empty() || produccion_finalizada;
+            });
+
+            if (buffer.empty() && produccion_finalizada)
+                break;
+
+            if (!buffer.empty()) {
+                archivo_path = buffer.front();
+                buffer.pop();
+                cv_buffer_not_full.notify_one();
+            } else {
+                continue;
+            }
+        }
+
+        // leer el archivo y procesar su contenido
+        std::ifstream archivo(archivo_path);
+        if (!archivo.is_open()) {
+            std::cerr << "No se pudo abrir el archivo: " << archivo_path << "\n";
+            continue;
+        }
+
+        std::string linea;
+        std::getline(archivo, linea);
+        archivo.close();
+
+        int id, sucursal;
+        double peso;
+        std::string token;
+        std::istringstream iss(linea);
+
+        if (std::getline(iss, token, ';'))
+            id = std::stoi(token);
+        if (std::getline(iss, token, ';'))
+            peso = std::stod(token);
+        if (std::getline(iss, token, ';'))
+            sucursal = std::stoi(token);
+
+        // para el resumen por sucursal
+        {
+            std::lock_guard<std::mutex> lock(mtx_resumen);
+            resumen_sucursal[sucursal].first += 1;     // incrementa el contador de paquetes para esa sucursal
+            resumen_sucursal[sucursal].second += peso; // acumula peso
+        }
+
+        // mover archivo a procesados
+        try {
+            fs::path origen = archivo_path;
+            fs::path destino = fs::path(path_directorio) / "procesados" / origen.filename();
+            fs::rename(origen, destino);
+            paquetes_consumidos.fetch_add(1);
+        } catch (const std::exception& e) {
+            std::cerr << "Error moviendo archivo " << archivo_path << ": " << e.what() << "\n";
+        }
     }
 }
 
@@ -190,24 +262,49 @@ int main(int argc, char* argv[]) {
     return EXIT_FAILURE;
     }
 
-    /// threads generadores
+    // estructuras para resumen
+    std::map<int, std::pair<int, double>> resumen_sucursal;
+    std::mutex mtx_resumen;
+
+    //hilos consumidores primero
+    std::vector<std::thread> threads_consumidores;
+    for (int i = 0; i < consumidores; ++i) {
+        threads_consumidores.emplace_back(consumidor, directorio, std::ref(resumen_sucursal), std::ref(mtx_resumen));
+    }
+
+    //hilos generadores
     std::vector<std::thread> threads_generadores;
     for (int i = 0; i < generadores; ++i) {
         threads_generadores.emplace_back(generador, paquetes, directorio);
     }
 
+    // cuando terminan los generadores, se unen los hilos
     for (auto& t : threads_generadores) {
         t.join();
     }
 
     std::cout << "Generación completada: " << paquetes_generados.load() << " paquetes generados.\n";
-    return 0;
 
-    // Threads Consumidores
+    // flag para indicarle a los consumidores que la producción ha finalizado 
+    produccion_finalizada = true;
+    cv_buffer_not_empty.notify_all();
 
-    // Buffer virtual compartido
+    // esperar a que los consumidores terminen
+    for (auto& t : threads_consumidores) {
+        t.join();
+    }
 
-    // Procesamiento y resumen
+    // mostrar el resumen
+    std::cout << "\nResumen por sucursal:\n";
+    for (const auto& [sucursal, datos] : resumen_sucursal) {
+        int cantidad = datos.first;
+        double peso_total = datos.second;
+        std::cout << "Sucursal " << sucursal
+                << ": " << cantidad << " paquetes, "
+                << std::fixed << std::setprecision(2)
+                << peso_total << " kg\n";
+    }
 
+    return EXIT_SUCCESS;
 
 }
