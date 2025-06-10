@@ -1,24 +1,28 @@
 #ifndef AHORCADO_H
 #define AHORCADO_H
 
-#define SEM_CLIENTE_LISTO     0  // cliente pide jugar
-#define SEM_SERVIDOR_OCUPADO  1  // servidor responde
-#define SEM_MUTEX             2  // acceso seguro a memoria
-#define SEM_LETRA_LISTA       3  // cliente puso letra
-#define SEM_RESPUESTA_LISTA   4  // servidor respondió
+#define SEM_MUTEX_NAME "/sem_mutex"
+#define SEM_LETRA_LISTA_NAME "/sem_letra_lista"
+#define SEM_RESULTADO_LISTO_NAME "/sem_resultado_listo"
+#define SEM_FRASE_LISTA_NAME "/sem_frase_lista"
+#define SEM_NUEVO_CLIENTE_NAME "/sem_nuevo_cliente"
+
 
 
 #include <iostream>
 #include <csignal>
 #include <sys/ipc.h>
 #include <sys/shm.h>
-#include <sys/sem.h>
 #include <cstring>
 #include <unistd.h>
 #include <vector>
 #include <fstream>
 #include <cstdlib>
 #include <ctime>
+#include <semaphore.h>
+#include <fcntl.h>
+#include <limits>
+
 #define SHM_SIZE 1024
 
 using namespace std;

@@ -7,16 +7,6 @@ void handle_sigusr1(int) {
     terminar = 1;
 }
 
-void aumentar_semaforo(int semid,short unsigned int semindex){
-    struct sembuf signal = {semindex,1,0};
-    semop(semid,&signal,1);
-}
-
-void decrementar_semaforo(int semid,short unsigned int semindex){
-    struct sembuf signal = {semindex,-1,0};
-    semop(semid,&signal,1);
-}
-
 vector<string> leer_frases(const string& nombre_archivo){
     vector<string> frases;
     ifstream archivo(nombre_archivo);
@@ -39,15 +29,28 @@ vector<string> leer_frases(const string& nombre_archivo){
     return frases;
 }
 
-void limpiar_sem_y_mem(key_t key) {
-    int semid = semget(key, 0, 0666);
-    if (semid != -1) {
-        semctl(semid, 0, IPC_RMID);
+
+string ofuscarFrase(const string& frase) {
+    string resultado;
+    for (char c : frase) {
+        if (c == ' ')
+            resultado += ' ';
+        else
+            resultado += '_';
     }
-    int shmid = shmget(key, SHM_SIZE, 0666);
-    if (shmid != -1) {
-        shmctl(shmid, IPC_RMID, nullptr);
+    return resultado;
+}
+
+
+bool descubrirLetra(const string& fraseOriginal, string& fraseOculta, char letra) {
+    bool hit = 0;
+    for (size_t i = 0; i < fraseOriginal.size(); ++i) {
+        if (tolower(fraseOriginal[i]) == tolower(letra)) {
+            fraseOculta[i] = fraseOriginal[i];
+            hit = 1;
+        }
     }
+    return hit;
 }
 
 
@@ -56,63 +59,78 @@ int main() {
     srand(time(nullptr));    
 
     signal(SIGUSR1, handle_sigusr1);
-    signal(SIGINT,SIG_IGN);
+    //signal(SIGINT,SIG_IGN);
 
     key_t key = ftok("shmfile", 65);
-    limpiar_sem_y_mem(key); // Limpia cualquier rastro anterior
     int shmid = shmget(key, SHM_SIZE, 0666 | IPC_CREAT);
     void* data = shmat(shmid, nullptr, 0);
     juegoCompartido* juego = static_cast<juegoCompartido*>(data);
 
-    int semid = semget(key, 5, 0666 | IPC_CREAT);
-    semctl(semid,SEM_CLIENTE_LISTO,SETVAL,0);  
-    semctl(semid,SEM_SERVIDOR_OCUPADO,SETVAL,0);  
-    semctl(semid,SEM_MUTEX,SETVAL,1);    
-    semctl(semid,SEM_LETRA_LISTA,SETVAL,0);
-    semctl(semid,SEM_RESPUESTA_LISTA,SETVAL,0); 
-
-    int cliente_id = 1;
-
+    sem_t* sem_mutex = sem_open(SEM_MUTEX_NAME, O_CREAT, 0666, 1);
+    sem_t* sem_letra_lista = sem_open(SEM_LETRA_LISTA_NAME, O_CREAT, 0666, 0);
+    sem_t* sem_resultado_listo = sem_open(SEM_RESULTADO_LISTO_NAME, O_CREAT, 0666, 0);
+    sem_t* sem_nuevo_cliente = sem_open(SEM_NUEVO_CLIENTE_NAME, O_CREAT, 0666, 0);
+    sem_t* sem_frase_lista = sem_open(SEM_FRASE_LISTA_NAME, O_CREAT, 0666, 0);
+    
     vector frases = leer_frases("frases.txt");
     
-    cout << "[Servidor] Inicialización finalizada." << endl;
-    aumentar_semaforo(semid,SEM_SERVIDOR_OCUPADO);
-    decrementar_semaforo(semid,SEM_CLIENTE_LISTO); //atiendo un cliente
-    decrementar_semaforo(semid,SEM_SERVIDOR_OCUPADO); //me pongo en ocupado
-    while (!terminar) {
+    while (!terminar)
+    {
+        sem_wait(sem_nuevo_cliente);
+        //Enviar palabra y turnos disponibles a cliente
+        bool juego_terminado = 0;
         int indice = rand() % frases.size();
+        string frase_original = frases[indice];
+        string frase_ofuscada = ofuscarFrase((const string&) frase_original);
 
-        string mensaje = frases[indice];
-
-        decrementar_semaforo(semid,SEM_MUTEX); //solicito region critica
-        strncpy(juego->frase, mensaje.c_str(),128);
-        aumentar_semaforo(semid,SEM_MUTEX); //libero region critica
-        cout << "Holaaaaa" << endl;
-        char letra;
-        /*for(int i = 0; i < CANT_INTENTOS; i++){
-            decrementar_semaforo(semid,SEM_LETRA_LISTA);
-            decrementar_semaforo(semid,SEM_MUTEX);
-            //strcpy(&letra,&juego->letra_sugerida);
-            cout << juego->letra_sugerida << endl;
-            aumentar_semaforo(semid,SEM_MUTEX);
+        sem_wait(sem_mutex);
+        strncpy(juego->frase,frase_ofuscada.c_str(),128);
+        strncpy(juego->progreso,frase_ofuscada.c_str(),128);
+        juego->intentos_restantes = 4;
+        sem_post(sem_mutex);
+        sem_post(sem_frase_lista);
+     
+        //Recibir letra desde cliente
+        while(!juego_terminado){
+            sem_wait(sem_letra_lista);
+            sem_wait(sem_mutex);
+            char letra = juego->letra_sugerida;
+            sem_post(sem_mutex);
+            cout << "[Servidor] Letra recibida: " << letra << endl;
+            if(!descubrirLetra((const string&) frase_original,(string&) frase_ofuscada,letra)){
+                cout << "[Servidor] Letra no encontrada, restando intento"<< endl;
+                sem_wait(sem_mutex);
+                if(!--juego->intentos_restantes){
+                    juego->juego_terminado = 1;
+                    juego_terminado = 1;
+                }
+                sem_post(sem_mutex);
+            }    
+            cout << "[Servidor]: Frase actualizada: ";
+            cout << frase_ofuscada<< endl;
+            sem_wait(sem_mutex);
+            strncpy(juego->progreso,frase_ofuscada.c_str(),128);
+            sem_post(sem_mutex);
+            sem_post(sem_resultado_listo);
         }
-        */
-        cout << "[Servidor] Esperando letra" << endl;
-        decrementar_semaforo(semid,SEM_LETRA_LISTA);
-        decrementar_semaforo(semid,SEM_MUTEX);
-        //strcpy(&letra,&juego->letra_sugerida);
-        cout << "[Servidor] Letra: ";
-        cout << juego->letra_sugerida << endl;
-        aumentar_semaforo(semid,SEM_MUTEX);
-        aumentar_semaforo(semid,SEM_RESPUESTA_LISTA);
     }
+    
+
+    cout << "[Servidor] Inicialización finalizada." << endl;
 
 
 
     cout << "[Servidor] Finalizando, liberando recursos...\n";
+    sem_close(sem_mutex);
+    sem_close(sem_letra_lista);
+    sem_close(sem_resultado_listo);
+
+
+    sem_unlink(SEM_MUTEX_NAME);
+    sem_unlink(SEM_LETRA_LISTA_NAME);
+    sem_unlink(SEM_RESULTADO_LISTO_NAME);
+
     shmdt(data);
     shmctl(shmid, IPC_RMID, nullptr);
-    semctl(semid, 0, IPC_RMID);
-
     return 0;
 }
