@@ -20,8 +20,13 @@ vector<string> leer_frases(const string& nombre_archivo){
         exit(1);
     }
 
+    if(archivo.peek() == std::ifstream::traits_type::eof()){
+        cerr << "[Servidor] Error: El archivo de frases ("<< nombre_archivo << ") se encuentra vacio" << endl;
+        exit(1);
+    }
+    
     string linea;
-
+    
     while(getline(archivo,linea)){
         if(!linea.empty()){
             frases.push_back(linea);
@@ -134,7 +139,10 @@ int main(int argc, char* argv[]) {
         help();
         return 1;
     }
-
+    
+    vector<string> frases = leer_frases(archivo);
+    vector<rankingEntry> ranking;
+    
     //valido que no exista otro servidor corriendo usando un lockfile
     int fd = open("/tmp/ahorcado_server.lock", O_CREAT | O_EXCL, 0644);
     if (fd == -1) {
@@ -171,8 +179,6 @@ int main(int argc, char* argv[]) {
     sem_t* sem_inicio_op2 = sem_open(SEM_INICIO_2_NAME, O_CREAT, 0666, 0);
     sem_t* sem_frase_intento_lista = sem_open(SEM_FRASE_I_NAME, O_CREAT, 0666, 0);
     
-    vector<string> frases = leer_frases(archivo);
-    vector<rankingEntry> ranking;
     cout << "[Servidor] Inicialización finalizada" << endl;
 
     while (true) {
@@ -318,7 +324,13 @@ int main(int argc, char* argv[]) {
 
     }
 
-    mostrarRanking(ranking);
+
+    if(ranking.empty()){
+        cout << "[Servidor] No se registraron partidas" << endl;
+    }
+    else {
+        mostrarRanking(ranking);
+    }
 
 
     // Liberar recursos
