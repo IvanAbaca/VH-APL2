@@ -63,9 +63,17 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (nickname.empty()) {
-        std::cerr << "Error: el nickname no puede estar vacío.\n";
+    if (nickname.empty() || nickname.length() > 20) {
+        std::cerr << "Error: el nickname debe tener entre 1 y 20 caracteres.\n";
         return 1;
+    }
+
+    // Validar que solo contenga letras a-z, A-Z
+    for (char c : nickname) {
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+            std::cerr << "Error: el nickname solo puede contener letras (a-z, A-Z).\n";
+            return 1;
+        }
     }
 
     int cliente_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -159,8 +167,9 @@ int main(int argc, char* argv[]) {
         std::cout << "Ingresá una letra: ";
         std::getline(std::cin, input);
 
-        if (input.length() != 1 || !std::isalpha(input[0])) {
-            std::cout << "Entrada inválida. Ingresá una sola letra del abecedario.\n";
+        if (input.length() != 1 || !std::isalpha(input[0]) || 
+            !((input[0] >= 'a' && input[0] <= 'z') || (input[0] >= 'A' && input[0] <= 'Z'))) {
+            std::cout << "Entrada inválida. Ingresá una sola letra (a-z, A-Z).\n";
             continue;
         }
 

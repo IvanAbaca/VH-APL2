@@ -51,14 +51,59 @@ std::string archivo_frases;
 bool puerto_set = false, usuarios_set = false, archivo_set = false;
 bool servidor_corriendo = true;
 
+bool validar_frase(const std::string& frase) {
+    if (frase.empty()) return false;
+    
+    int letras_jugables = 0;
+    for (char c : frase) {
+        if (c == ' ') {
+            continue; // Espacios permitidos
+        } else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+            letras_jugables++;
+        } else {
+            return false; // Carácter no válido
+        }
+    }
+    
+    return letras_jugables >= 3; // Al menos 3 letras jugables
+}
+
+bool validar_nickname(const std::string& nickname) {
+    if (nickname.empty() || nickname.length() > 20) {
+        return false;
+    }
+    
+    for (char c : nickname) {
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+            return false; // Solo letras a-z, A-Z
+        }
+    }
+    
+    return true;
+}
+
 std::vector<std::string> cargar_frases(const std::string& archivo) {
     std::ifstream file(archivo);
     std::vector<std::string> frases;
     std::string linea;
+    int linea_num = 1;
 
     while (std::getline(file, linea)) {
-        if (!linea.empty())
-            frases.push_back(linea);
+        // Limpiar espacios al inicio y final
+        linea.erase(0, linea.find_first_not_of(" \t\r\n"));
+        linea.erase(linea.find_last_not_of(" \t\r\n") + 1);
+        
+        if (!linea.empty()) {
+            if (validar_frase(linea)) {
+                frases.push_back(linea);
+                std::cout << "Frase válida línea " << linea_num << ": " << linea << std::endl;
+            } else {
+                std::cerr << "ERROR: Frase inválida en línea " << linea_num << ": '" << linea << "'" << std::endl;
+                std::cerr << "       Solo se permiten letras (a-z, A-Z) y espacios, mínimo 3 letras." << std::endl;
+                exit(1);
+            }
+        }
+        linea_num++;
     }
 
     return frases;
@@ -408,6 +453,15 @@ void manejar_conexion(int cliente_fd) {
     }
     buffer[bytes] = '\0';
     std::string nickname(buffer);
+
+    // Validar nickname (solo a-z, A-Z, 1-20 caracteres)
+    if (!validar_nickname(nickname)) {
+        const char* msg = "Error: nickname inválido. Solo letras a-z, A-Z, máximo 20 caracteres.\n";
+        send(cliente_fd, msg, strlen(msg), 0);
+        close(cliente_fd);
+        std::cout << "Conexión rechazada por nickname inválido: " << nickname << "\n";
+        return;
+    }
 
     // 2. PRIMERO: Verificar jugadores listos (limpiar desconectados)
     {
