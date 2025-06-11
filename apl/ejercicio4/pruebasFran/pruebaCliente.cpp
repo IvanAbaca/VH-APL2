@@ -1,23 +1,14 @@
 #include "ahorcado.h"
 
 int main() {
-
-    const char* SERVER_LOCKFILE = "/tmp/ahorcado_server.lock";
-
-    ifstream lockfile(SERVER_LOCKFILE);
-    int server_pid = 0;
-
-    if (!(lockfile >> server_pid)) {
-        cerr << "No se detectó un servidor activo. Abortando...\n";
+    
+    sem_t* sem_mutex = sem_open(SEM_MUTEX_NAME, 0);
+    if (sem_mutex == SEM_FAILED) {
+        std::cerr << "No se detectó un servidor activo. Abortando...\n";
+        sem_close(sem_mutex);
         exit(1);
     }
-    lockfile.close();
 
-   /* if (kill(server_pid, 0) == -1 && errno != EPERM) {
-        cerr << "No se detectó un servidor activo. Abortando...\n";
-        exit(1);
-    }
-*/
     //verifico que no haya un cliente activo
     int lock_fd = open("/tmp/ahorcado_cliente.lock", O_CREAT | O_EXCL, 0444);
     if (lock_fd == -1) {
@@ -30,7 +21,6 @@ int main() {
     int shmid = shmget(key, SHM_SIZE, 0666);
     void* data = shmat(shmid, nullptr, 0);
 
-    sem_t* sem_mutex = sem_open(SEM_MUTEX_NAME, 0);
     sem_t* sem_letra_lista = sem_open(SEM_LETRA_LISTA_NAME, 0);
     sem_t* sem_resultado_listo = sem_open(SEM_RESULTADO_LISTO_NAME, 0);
     sem_t* sem_nuevo_cliente = sem_open(SEM_NUEVO_CLIENTE_NAME, 0);
@@ -77,56 +67,65 @@ int main() {
         cout << "Menú de juego:\n"; 
         cout << "1 - Enviar letra\n";
         cout << "2 - Adivinar palabra\n"; 
+        cout << "3 - Salir\n";
         cout << "Seleccione una opción: ";
 
         do {
             getline(cin, opcion);
-        } while (opcion.empty() || (opcion[0] != '1' && opcion[0] != '2')); 
+        } while (opcion.empty() || (opcion[0] != '1' && opcion[0] != '2' && opcion[0] != '3')); 
 
         sem_wait(sem_mutex);
         juego->opcion = opcion[0];
         sem_post(sem_mutex);
         sem_post(sem_opcion_lista);
 
-        //opcion 1: adivinar letra
-        if (opcion[0] == '1') {
-            sem_wait(sem_inicio_1); 
+        switch (opcion[0]) {
+            //opcion 1: adivinar letra
+            case '1': {
+                sem_wait(sem_inicio_1); 
 
-            cout << "Ingrese una letra: ";
-            do {
-                getline(cin, letraS);
-            } while (letraS.empty()); 
-            letra = letraS[0];
+                cout << "Ingrese una letra: ";
+                do {
+                    getline(cin, letraS);
+                } while (letraS.empty()); 
+                letra = letraS[0];
 
-            cout << "Enviando letra: " << letra << "\n";
+                cout << "Enviando letra: " << letra << "\n";
 
-            sem_wait(sem_mutex);
-            juego->letra_sugerida = letra;
-            sem_post(sem_mutex);
-            sem_post(sem_letra_lista);
+                sem_wait(sem_mutex);
+                juego->letra_sugerida = letra;
+                sem_post(sem_mutex);
+                sem_post(sem_letra_lista);
 
-            sem_wait(sem_resultado_listo);
+                sem_wait(sem_resultado_listo);
 
-            sem_wait(sem_mutex);
-            intentos = juego->intentos_restantes; 
-            juego_terminado = juego->juego_terminado; 
-            strncpy(progreso, juego->progreso, 128); 
-            sem_post(sem_mutex);
+                sem_wait(sem_mutex);
+                intentos = juego->intentos_restantes; 
+                juego_terminado = juego->juego_terminado; 
+                strncpy(progreso, juego->progreso, 128); 
+                sem_post(sem_mutex);
 
-            cout << "\n/// RESULTADO OBTENIDO ///\n"; 
-            cout << "Cantidad de intentos restantes: " << intentos << "\n"; 
-            cout << "Progreso de frase: " << progreso << "\n"; 
-            cout << "/// RESULTADO OBTENIDO ///\n\n"; 
-        }
-        //opcion 2: adivinar frase
-        else {
-            sem_wait(sem_inicio_op2);
-            sem_wait(sem_mutex);
-            cout << "Ingrese una frase: ";
-            cin.getline(juego->frase_sugerida,128);
-            sem_post(sem_mutex);
-            sem_post(sem_frase_intento_lista);
-            sem_wait(sem_resultado_listo);
+                cout << "\n/// RESULTADO OBTENIDO ///\n"; 
+                cout << "Cantidad de intentos restantes: " << intentos << "\n"; 
+                cout << "Progreso de frase: " << progreso << "\n"; 
+                cout << "/// RESULTADO OBTENIDO ///\n\n"; 
+                break;
+            }
+            //opcion 2: adivinar frase
+            case '2': {
+                sem_wait(sem_inicio_op2);
+                sem_wait(sem_mutex);
+                cout << "Ingrese una frase: ";
+                cin.getline(juego->frase_sugerida,128);
+                sem_post(sem_mutex);
+                sem_post(sem_frase_intento_lista);
+                sem_wait(sem_resultado_listo);
+                break;
+            }
+            case '3':{
+                sem_wait(sem_inicio_1);
+                sem_wait(sem_resultado_listo);     
+            }
         }
     }
 
