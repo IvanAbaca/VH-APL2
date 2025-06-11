@@ -92,6 +92,11 @@ bool load_phrases(const string& filename, vector<string>& out_phrases) {
     }
     string line;
     while (std::getline(ifs, line)) {
+        // --- Aquí quitamos un '\r' final si existe ---
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        // ---------------------------------------------
         if (!line.empty()) {
             out_phrases.push_back(line);
         }
@@ -99,6 +104,7 @@ bool load_phrases(const string& filename, vector<string>& out_phrases) {
     ifs.close();
     return !out_phrases.empty();
 }
+
 
 // ------------------------------
 // Crea la versión “enmascarada” de la frase:
