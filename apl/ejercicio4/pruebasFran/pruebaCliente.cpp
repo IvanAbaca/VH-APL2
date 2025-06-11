@@ -1,7 +1,33 @@
 #include "ahorcado.h"
 
-int main() {
+
+void help(){
+    cout << "Ayuda" << endl;
+}
+
+
+int main(int argc, char* argv[]) {
     
+    string nickname;
+
+    //tomo los parametros
+    for(int i = 1; i < argc; i++){
+        string arg = argv[i];
+        if ((arg == "-n" || arg == "--nickname") && i + 1 < argc) {
+            nickname = argv[++i];
+        }
+        else if (arg == "-h" || arg == "--help") {
+            help();   
+            return 0;
+        }
+    }
+
+    if(nickname.empty()){
+        cerr << "Error: nickname no especificado." << endl;
+        help();
+        return 1;
+    }
+
     sem_t* sem_mutex = sem_open(SEM_MUTEX_NAME, 0);
     if (sem_mutex == SEM_FAILED) {
         std::cerr << "No se detectó un servidor activo. Abortando...\n";
@@ -39,6 +65,10 @@ int main() {
     bool juego_terminado = false; 
     int intentos = 0; 
 
+    sem_wait(sem_mutex);
+    strncpy(juego->usuario_nickname,nickname.c_str(),128);
+    sem_post(sem_mutex);
+
     sem_post(sem_nuevo_cliente);
     sem_wait(sem_frase_lista);
 
@@ -49,8 +79,10 @@ int main() {
     sem_post(sem_mutex);
 
     cout << "\n/// NUEVO JUEGO ///\n"; 
+    cout << "¡Hola " << nickname << "!\n";
     cout << "Frase: " << progreso << "\n"; 
     cout << "/// NUEVO JUEGO ///\n\n"; 
+
 
     while (!juego_terminado) { 
 

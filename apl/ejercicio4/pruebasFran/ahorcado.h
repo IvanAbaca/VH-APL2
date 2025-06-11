@@ -11,6 +11,7 @@
 #define SEM_INICIO_2_NAME "/sem_inicio_2"
 #define SEM_FRASE_I_NAME "/sem_frase_intento"
 
+#include <chrono>
 #include <iostream>
 #include <csignal>
 #include <sys/ipc.h>
@@ -26,6 +27,7 @@
 #include <limits>
 #include <algorithm>
 #include <cctype>
+#include <iomanip>
 
 
 
@@ -38,11 +40,18 @@ struct juegoCompartido {
     char progreso[128];
     char frase_sugerida[128];
     char letra_sugerida;
+    char usuario_nickname[128];
     char opcion;
     int intentos_restantes;
     bool letra_disponible;
     bool juego_terminado;
     bool victoria;
+};
+
+struct rankingEntry {
+    string nickname;
+    string frase;
+    double tiempo_segundos;
 };
 
 

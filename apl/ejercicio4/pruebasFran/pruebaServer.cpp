@@ -69,10 +69,45 @@ void help(){
     cout << "Ayuda" << endl;
 }
 
+
+void mostrarRanking(const vector<rankingEntry>& ranking) {
+
+    vector<rankingEntry> ordenado = ranking;
+    sort(ordenado.begin(), ordenado.end(), [](const rankingEntry& a, const rankingEntry& b) {
+        return a.tiempo_segundos < b.tiempo_segundos;
+    });
+
+    cout << "\n=========  RANKING DE JUGADORES  =========\n\n";
+    cout << left << setw(5) << "#" 
+         << setw(15) << "Jugador" 
+         << setw(25) << "Frase Adivinada" 
+         << setw(12) << "Tiempo (mm:ss)"
+         << "\n" << string(60, '-') << "\n";
+
+    for (size_t i = 0; i < ordenado.size(); ++i) {
+        int minutos = static_cast<int>(ordenado[i].tiempo_segundos) / 60;
+        double segundos_restantes = ordenado[i].tiempo_segundos - (minutos * 60);
+
+        stringstream tiempo_formateado;
+        tiempo_formateado << setfill('0') << setw(2) << minutos << ":"
+                        << fixed << setprecision(2)
+                        << setw(5) << segundos_restantes;
+
+        cout << left << setw(5) << (i + 1)
+            << setw(15) << ordenado[i].nickname
+            << setw(25) << ordenado[i].frase.substr(0, 24)
+            << setw(10) << tiempo_formateado.str()
+            << endl;
+    }
+
+    cout << "\n==============================================\n";
+}
+
+
 int main(int argc, char* argv[]) {
 
     string archivo;
-    int intentos;
+    int intentos = -1;
 
     //tomo los parametros
     for(int i = 1; i < argc; i++){
@@ -89,6 +124,16 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    if(archivo.empty()){
+        cerr << "[Servidor] Error: archivo de frases no especificado." << endl;
+        help();
+        return 1;
+    }
+    else if (intentos == -1){
+        cerr << "[Servidor] Error: debe especificar la cantidad de intentos." << endl;
+        help();
+        return 1;
+    }
 
     //valido que no exista otro servidor corriendo usando un lockfile
     int fd = open("/tmp/ahorcado_server.lock", O_CREAT | O_EXCL, 0644);
@@ -127,12 +172,12 @@ int main(int argc, char* argv[]) {
     sem_t* sem_frase_intento_lista = sem_open(SEM_FRASE_I_NAME, O_CREAT, 0666, 0);
     
     vector<string> frases = leer_frases(archivo);
+    vector<rankingEntry> ranking;
     cout << "[Servidor] Inicialización finalizada" << endl;
 
     while (true) {
         if (terminar_sig2) break;
 
-        
         timespec ts; //espero un nuevo cliente con timeout para chequear señales
         clock_gettime(CLOCK_REALTIME, &ts);
         ts.tv_sec += 1;
@@ -149,7 +194,8 @@ int main(int argc, char* argv[]) {
             break;
         }
 
-        
+        rankingEntry jugador;
+
         bool juego_terminado = false; //iniciar nueva partida
         int indice = rand() % frases.size();
         string frase_original = frases[indice];
@@ -160,8 +206,12 @@ int main(int argc, char* argv[]) {
         strncpy(juego->progreso, frase_ofuscada.c_str(), 128);
         juego->intentos_restantes = intentos;
         juego->juego_terminado = false;
+        jugador.frase = frase_original;
+        jugador.nickname = juego->usuario_nickname;
         sem_post(sem_mutex);
         sem_post(sem_frase_lista);
+
+        auto ini = chrono::steady_clock::now();
 
         while (!juego_terminado) {
             if (terminar_sig2) {
@@ -222,6 +272,9 @@ int main(int argc, char* argv[]) {
 
                     if (esFraseCorrecta(frase_original, f_sugerida)) {
                         cout << "[Servidor] Frase sugerida correcta, finalizando partida." << endl;
+                        auto fin = chrono::steady_clock::now();
+                        chrono::duration<double> duracion = fin - ini;
+                        jugador.tiempo_segundos = duracion.count();
                         sem_wait(sem_mutex);
                         juego->juego_terminado = true;
                         juego->victoria = true;
@@ -232,6 +285,9 @@ int main(int argc, char* argv[]) {
                         cout << "[Servidor] Frase sugerida incorrecta, restando intento." << endl;
                         sem_wait(sem_mutex);
                         if (--juego->intentos_restantes == 0) {
+                            auto fin = chrono::steady_clock::now();
+                            chrono::duration<double> duracion = fin - ini;
+                            jugador.tiempo_segundos = duracion.count();
                             juego->juego_terminado = true;
                             juego->victoria = false;
                             juego_terminado = true;
@@ -252,13 +308,18 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
-
+        
+        ranking.push_back(jugador);
 
         if (terminar_sig1) {
             cout << "[Servidor] Terminación suave solicitada. Cerrando luego de la partida...\n";
             break;
         }
+
     }
+
+    mostrarRanking(ranking);
+
 
     // Liberar recursos
     cout << "[Servidor] Finalizando, liberando recursos...\n";
