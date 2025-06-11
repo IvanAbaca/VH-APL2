@@ -121,16 +121,31 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    bytes = recv(cliente_fd, buffer, BUFFER_SIZE - 1, 0);
-    if (bytes <= 0) {
-        std::cerr << "Se perdió la conexión antes de que empiece la partida.\n";
-        close(cliente_fd);
-        return 1;
-    }
-    buffer[bytes] = '\0';
-    std::string mensaje(buffer);
+    // Manejar ACK y esperar inicio de partida
+    while (true) {
+        bytes = recv(cliente_fd, buffer, BUFFER_SIZE - 1, 0);
+        if (bytes <= 0) {
+            std::cerr << "Se perdió la conexión antes de que empiece la partida.\n";
+            close(cliente_fd);
+            return 1;
+        }
+        buffer[bytes] = '\0';
+        std::string mensaje(buffer);
 
-    if (mensaje.find("PARTIDA_INICIADA") == std::string::npos) {
+        // Si recibe ACK, responder
+        if (mensaje.find("ACK") != std::string::npos) {
+            const char* ack_response = "ACK_OK";
+            send(cliente_fd, ack_response, strlen(ack_response), 0);
+            std::cout << "Respondiendo verificación del servidor...\n";
+            continue; // Seguir esperando
+        }
+
+        // Si recibe PARTIDA_INICIADA, salir del bucle
+        if (mensaje.find("PARTIDA_INICIADA") != std::string::npos) {
+            break;
+        }
+
+        // Mensaje inesperado
         std::cerr << "Mensaje inesperado del servidor: " << mensaje << "\n";
         close(cliente_fd);
         return 1;
@@ -170,8 +185,16 @@ int main(int argc, char* argv[]) {
 
         std::cout << buffer << "\n";
 
-        // Para este mini juego, el servidor enviará un mensaje de cierre
-        if (std::string(buffer).find("FIN") != std::string::npos) {
+        // Verificar si el juego terminó
+        if (std::string(buffer).find("FIN") != std::string::npos ||
+            std::string(buffer).find("🚫 Partida terminada por administrador") != std::string::npos) {
+            
+            if (std::string(buffer).find("🚫 Partida terminada por administrador") != std::string::npos) {
+                std::cout << "\n⏳ Presiona Enter para salir...";
+                std::cin.get();
+                break;
+            }
+            
             std::cout << "Esperando resultados finales...\n";
 
             // Esperar mensaje final del servidor

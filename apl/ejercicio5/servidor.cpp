@@ -11,6 +11,8 @@
 #include <cstdlib>
 #include <ctime>
 #include <sstream>
+#include <chrono>
+#include <signal.h>
 
 #define PUERTO 5000
 #define BUFFER_SIZE 1024
@@ -47,6 +49,7 @@ EstadoServidor estado_servidor = SERVIDOR_ESPERANDO_CONEXIONES;
 std::string frase_global;
 std::string archivo_frases;
 bool puerto_set = false, usuarios_set = false, archivo_set = false;
+bool servidor_corriendo = true;
 
 std::vector<std::string> cargar_frases(const std::string& archivo) {
     std::ifstream file(archivo);
@@ -59,6 +62,46 @@ std::vector<std::string> cargar_frases(const std::string& archivo) {
     }
 
     return frases;
+}
+
+void verificar_jugadores_listos() {
+    std::cout << "🔍 Verificando jugadores listos..." << std::endl;
+    
+    for (auto it = jugadores.begin(); it != jugadores.end();) {
+        if (it->estado == LISTO) {
+            // Enviar ACK
+            const char* ack_msg = "ACK\n";
+            if (send(it->socket_fd, ack_msg, 4, 0) < 0) {
+                std::cout << "Jugador " << it->nickname << " desconectado (error enviando ACK)" << std::endl;
+                close(it->socket_fd);
+                it = jugadores.erase(it);
+                continue;
+            }
+            
+            // Esperar respuesta
+            char buffer[BUFFER_SIZE];
+            int bytes = recv(it->socket_fd, buffer, BUFFER_SIZE - 1, 0);
+            if (bytes <= 0) {
+                std::cout << "Jugador " << it->nickname << " desconectado (no respondió ACK)" << std::endl;
+                close(it->socket_fd);
+                it = jugadores.erase(it);
+                continue;
+            }
+            
+            buffer[bytes] = '\0';
+            std::string respuesta(buffer);
+            
+            if (respuesta.find("ACK_OK") == std::string::npos) {
+                std::cout << "Jugador " << it->nickname << " desconectado (respuesta inválida)" << std::endl;
+                close(it->socket_fd);
+                it = jugadores.erase(it);
+                continue;
+            }
+            
+            std::cout << "Jugador " << it->nickname << " respondió ACK correctamente" << std::endl;
+        }
+        ++it;
+    }
 }
 
 void reiniciar_servidor() {
@@ -103,8 +146,9 @@ void enviar_resultados_finales() {
 
     std::string mensaje_final = resultados.str();
 
+    // Solo enviar a jugadores que terminaron normalmente (no por señal)
     for (auto& j : jugadores) {
-        if (j.estado == TERMINADO) {
+        if (j.estado == TERMINADO && j.socket_fd != -1) {
             send(j.socket_fd, mensaje_final.c_str(), mensaje_final.size(), 0);
             close(j.socket_fd);
         }
@@ -236,20 +280,19 @@ void* partida_jugador(void* arg) {
         bool acierto = false;
 
         for (size_t i = 0; i < frase.size(); ++i) {
-            if (frase[i] == letra) {
-                progreso[i] = letra;
+            if (std::tolower(frase[i]) == letra) {
+                progreso[i] = frase[i];
                 acierto = true;
-                if (acierto) jugador->aciertos++;
             }
         }
+        
+        if (acierto) jugador->aciertos++;
 
         std::string respuesta;
-        if (acierto) {
-            respuesta += "\n" + dibujo_ahorcado(errores);
-        } else {
+        if (!acierto) {
             errores++;
-            respuesta += "\n" + dibujo_ahorcado(errores);
         }
+        respuesta += "\n" + dibujo_ahorcado(errores);
 
         respuesta += "Frase: " + progreso + "\n";
         respuesta += "Errores: " + std::to_string(errores) + "/" + std::to_string(max_errores) + "\n";
@@ -339,6 +382,9 @@ void iniciar_partida() {
 }
 
 void mostrar_estado_listos() {
+    // Verificar jugadores listos antes de contar
+    verificar_jugadores_listos();
+    
     int total_listos = std::count_if(jugadores.begin(), jugadores.end(),
         [](const Jugador& j) { return j.estado == LISTO; });
 
@@ -363,7 +409,13 @@ void manejar_conexion(int cliente_fd) {
     buffer[bytes] = '\0';
     std::string nickname(buffer);
 
-    // 2. Validar nickname único
+    // 2. PRIMERO: Verificar jugadores listos (limpiar desconectados)
+    {
+        std::lock_guard<std::mutex> lock(mutex_jugadores);
+        verificar_jugadores_listos();
+    }
+
+    // 3. DESPUÉS: Validar nickname único
     {
         std::lock_guard<std::mutex> lock(mutex_jugadores);
         for (const auto& j : jugadores) {
@@ -377,7 +429,7 @@ void manejar_conexion(int cliente_fd) {
         }
     }
 
-    // 3. Agregar jugador válido a la lista
+    // 4. Agregar jugador válido a la lista
     {
         std::lock_guard<std::mutex> lock(mutex_jugadores);
         Jugador nuevo_jugador;
@@ -388,11 +440,11 @@ void manejar_conexion(int cliente_fd) {
         std::cout << "Jugador conectado: " << nickname << "\n";
     }
 
-    // 4. Confirmación de conexión
+    // 5. Confirmación de conexión
     const char* ok = "Conectado correctamente al servidor.\n";
     send(cliente_fd, ok, strlen(ok), 0);
 
-    // 5. Esperar "listo"
+    // 6. Esperar "listo"
     while (true) {
         bytes = recv(cliente_fd, buffer, BUFFER_SIZE - 1, 0);
         if (bytes <= 0) {
@@ -451,7 +503,65 @@ bool es_entero(const std::string& s) {
     return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
+void manejador_senales(int signal) {
+    switch(signal) {
+        case SIGINT:
+            std::cout << "\n[SEÑAL] SIGINT recibida - Cerrando servidor..." << std::endl;
+            servidor_corriendo = false;
+            exit(0);
+            break;
+            
+        case SIGUSR1: {
+            std::lock_guard<std::mutex> lock(mutex_jugadores);
+            if (estado_servidor != SERVIDOR_JUGANDO) {
+                std::cout << "\n[SEÑAL] SIGUSR1 - No hay partidas en curso, finalizando..." << std::endl;
+                servidor_corriendo = false;
+                exit(0);
+            } else {
+                std::cout << "\n[SEÑAL] SIGUSR1 - Hay partidas en curso, ignorando..." << std::endl;
+            }
+            break;
+        }
+        
+        case SIGUSR2: {
+            std::lock_guard<std::mutex> lock(mutex_jugadores);
+            if (estado_servidor == SERVIDOR_JUGANDO) {
+                std::cout << "\n[SEÑAL] SIGUSR2 - Finalizando partidas en curso..." << std::endl;
+                
+                // Notificar a todos los jugadores activos y cerrar conexiones
+                for (auto& jugador : jugadores) {
+                    if (jugador.estado == JUGANDO) {
+                        std::string msg = "\n🚫 Partida terminada por administrador\n";
+                        send(jugador.socket_fd, msg.c_str(), msg.size(), 0);
+                        jugador.estado = TERMINADO;
+                        jugador.tiempo_fin = std::chrono::steady_clock::now();
+                        close(jugador.socket_fd);
+                        jugador.socket_fd = -1; // Marcar como cerrado
+                    }
+                }
+                
+                // Mostrar resultados en servidor y terminar
+                enviar_resultados_finales();
+                exit(0);
+            } else {
+                std::cout << "\n[SEÑAL] SIGUSR2 - No hay partidas en curso" << std::endl;
+            }
+            break;
+        }
+    }
+}
+
+void setup_signal_handlers() {
+    signal(SIGINT, manejador_senales);
+    signal(SIGUSR1, manejador_senales);
+    signal(SIGUSR2, manejador_senales);
+    signal(SIGPIPE, SIG_IGN); // Ignorar SIGPIPE
+}
+
 int main(int argc, char* argv[]) {
+    // Configurar señales al inicio
+    setup_signal_handlers();
+    
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
 
@@ -530,6 +640,12 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "Servidor escuchando en el puerto " << puerto << "...\n";
+    std::cout << "🆔 PID del servidor: " << getpid() << "\n";
+    std::cout << "📋 Comandos de control:\n";
+    std::cout << "   • Ctrl-C o kill -INT " << getpid() << "  → Cierre inmediato\n";
+    std::cout << "   • kill -USR1 " << getpid() << "       → Cierre si no hay partidas\n";
+    std::cout << "   • kill -USR2 " << getpid() << "       → Terminar partidas y cerrar\n";
+    std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
 
     while (true) {
         int cliente_fd = accept(servidor_fd, nullptr, nullptr);
