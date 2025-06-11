@@ -67,7 +67,7 @@ void limpiar_y_salir(int signo) {
 
 // Función para registrar impresión
 void registrar_en_log(ofstream& logger, pid_t pid, const string& archivo, Estado estado, const string& contenido = "") {
-    string mensaje =  "PID " + to_string(pid) + " imprimió el archivo " + archivo + " el día " + obtener_timestamp() + "\n";
+    string mensaje =  "PID " + to_string(pid) + " procesó el archivo " + archivo + " el día " + obtener_timestamp() + "\n";
     logger << mensaje;
     cout << mensaje;
     if (estado == OK) {
