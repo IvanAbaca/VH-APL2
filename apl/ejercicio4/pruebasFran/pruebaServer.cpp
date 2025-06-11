@@ -1,11 +1,15 @@
+#include <ctime>
+#include <cerrno>
+
 #include "ahorcado.h"
 #define CANT_INTENTOS 4
 
-volatile sig_atomic_t terminar = 0;
+volatile sig_atomic_t terminar_sig1 = 0;
+volatile sig_atomic_t terminar_sig2 = 0;
 
-void handle_sigusr1(int) {
-    terminar = 1;
-}
+
+void handle_sigusr1(int) { terminar_sig1 = 1; }
+void handle_sigusr2(int) { terminar_sig2 = 1; }
 
 vector<string> leer_frases(const string& nombre_archivo){
     vector<string> frases;
@@ -53,14 +57,39 @@ bool descubrirLetra(const string& fraseOriginal, string& fraseOculta, char letra
     return hit;
 }
 
+string toLowerString(const string& input) {
+    string result = input;
+    transform(result.begin(), result.end(), result.begin(),
+              [](unsigned char c) { return tolower(c); });
+    return result;
+}
+
+bool esFraseCorrecta(const string fraseOriginal, const string fraseSugerida) {
+    return toLowerString(fraseOriginal) == toLowerString(fraseSugerida);
+}
 
 int main() {
+    //valido que no exista otro servidor corriendo usando un lockfile
+    int fd = open("/tmp/ahorcado_server.lock", O_CREAT | O_EXCL, 0644);
+    if (fd == -1) {
+        cerr << "[Servidor] Error: Ya hay un servidor en ejecución, abortando iniciación." << endl;
+        exit(1);
+    }
+
+    //guardo el pid en el lockfile para que el cliente pueda verificar si el proceso sigue vivo
+    char pid_str[32];
+    snprintf(pid_str, sizeof(pid_str), "%d\n", getpid());
+    write(fd, pid_str, strlen(pid_str));
+    fsync(fd);
+
     cout << "[Servidor] Inicializando servidor..." << endl;
-    srand(time(nullptr));    
+    srand(time(nullptr));
 
+    // Registrar señales
     signal(SIGUSR1, handle_sigusr1);
-    //signal(SIGINT,SIG_IGN);
+    signal(SIGUSR2, handle_sigusr2);
 
+    // Compartir memoria y abrir semáforos
     key_t key = ftok("shmfile", 65);
     int shmid = shmget(key, SHM_SIZE, 0666 | IPC_CREAT);
     void* data = shmat(shmid, nullptr, 0);
@@ -71,66 +100,160 @@ int main() {
     sem_t* sem_resultado_listo = sem_open(SEM_RESULTADO_LISTO_NAME, O_CREAT, 0666, 0);
     sem_t* sem_nuevo_cliente = sem_open(SEM_NUEVO_CLIENTE_NAME, O_CREAT, 0666, 0);
     sem_t* sem_frase_lista = sem_open(SEM_FRASE_LISTA_NAME, O_CREAT, 0666, 0);
+    sem_t* sem_opcion_lista = sem_open(SEM_OPCION_LISTA_NAME, O_CREAT, 0666, 0);
+    sem_t* sem_inicio_op1 = sem_open(SEM_INICIO_1_NAME, O_CREAT, 0666, 0);
+    sem_t* sem_inicio_op2 = sem_open(SEM_INICIO_2_NAME, O_CREAT, 0666, 0);
+    sem_t* sem_frase_intento_lista = sem_open(SEM_FRASE_I_NAME, O_CREAT, 0666, 0);
     
-    vector frases = leer_frases("frases.txt");
-    
-    while (!terminar)
-    {
-        sem_wait(sem_nuevo_cliente);
-        //Enviar palabra y turnos disponibles a cliente
-        bool juego_terminado = 0;
+    vector<string> frases = leer_frases("frases.txt");
+    cout << "[Servidor] Inicialización finalizada" << endl;
+
+    while (true) {
+        if (terminar_sig2) break;
+
+        
+        timespec ts; //espero un nuevo cliente con timeout para chequear señales
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += 1;
+
+        int wait_result = sem_timedwait(sem_nuevo_cliente, &ts); 
+        if (wait_result == -1) {
+            if (errno == ETIMEDOUT || errno == EINTR){
+                if(terminar_sig1){
+                    break;
+                }
+                continue;
+            }
+            perror("[Servidor] Error en sem_timedwait");
+            break;
+        }
+
+        
+        bool juego_terminado = false; //iniciar nueva partida
         int indice = rand() % frases.size();
         string frase_original = frases[indice];
-        string frase_ofuscada = ofuscarFrase((const string&) frase_original);
+        string frase_ofuscada = ofuscarFrase(frase_original);
 
         sem_wait(sem_mutex);
-        strncpy(juego->frase,frase_ofuscada.c_str(),128);
-        strncpy(juego->progreso,frase_ofuscada.c_str(),128);
-        juego->intentos_restantes = 4;
+        strncpy(juego->frase, frase_original.c_str(), 128);
+        strncpy(juego->progreso, frase_ofuscada.c_str(), 128);
+        juego->intentos_restantes = CANT_INTENTOS;
+        juego->juego_terminado = false;
         sem_post(sem_mutex);
         sem_post(sem_frase_lista);
-     
-        //Recibir letra desde cliente
-        while(!juego_terminado){
-            sem_wait(sem_letra_lista);
-            sem_wait(sem_mutex);
-            char letra = juego->letra_sugerida;
-            sem_post(sem_mutex);
-            cout << "[Servidor] Letra recibida: " << letra << endl;
-            if(!descubrirLetra((const string&) frase_original,(string&) frase_ofuscada,letra)){
-                cout << "[Servidor] Letra no encontrada, restando intento"<< endl;
+
+        while (!juego_terminado) {
+            if (terminar_sig2) {
+                cout << "[Servidor] Terminando partida actual por SIGUSR2...\n";
                 sem_wait(sem_mutex);
-                if(!--juego->intentos_restantes){
-                    juego->juego_terminado = 1;
-                    juego_terminado = 1;
-                }
+                juego->juego_terminado = true;
+                strncpy(juego->progreso, frase_original.c_str(), 128);
                 sem_post(sem_mutex);
-            }    
-            cout << "[Servidor]: Frase actualizada: ";
-            cout << frase_ofuscada<< endl;
-            sem_wait(sem_mutex);
-            strncpy(juego->progreso,frase_ofuscada.c_str(),128);
-            sem_post(sem_mutex);
-            sem_post(sem_resultado_listo);
+                sem_post(sem_resultado_listo);
+                juego_terminado = true;
+                break;
+            }
+
+            sem_wait(sem_opcion_lista);
+
+            //opcion 1: adivinar letra
+            if (juego->opcion == '1') {
+                sem_post(sem_inicio_op1);
+                sem_wait(sem_letra_lista);
+
+                sem_wait(sem_mutex);
+                char letra = juego->letra_sugerida;
+                sem_post(sem_mutex);
+
+                cout << "[Servidor] Letra recibida: " << letra << endl;
+
+                if (!descubrirLetra(frase_original, frase_ofuscada, letra)) {
+                    cout << "[Servidor] Letra incorrecta. Restando intento.\n";
+                    sem_wait(sem_mutex);
+                    if (--juego->intentos_restantes == 0) {
+                        juego->juego_terminado = true;
+                        juego_terminado = true;
+                    }
+                    sem_post(sem_mutex);
+                }
+
+                cout << "[Servidor] Frase actualizada: " << frase_ofuscada << endl;
+
+                sem_wait(sem_mutex);
+                strncpy(juego->progreso, frase_ofuscada.c_str(), 128);
+                sem_post(sem_mutex);
+
+                sem_post(sem_resultado_listo);
+            }
+            //opcion 2: adivinar frase 
+            else {
+                sem_post(sem_inicio_op2);
+                sem_wait(sem_frase_intento_lista);
+
+                char f_sugerida[128];
+                sem_wait(sem_mutex);
+                strncpy(f_sugerida,juego->frase_sugerida, 128);
+                cout << "Frase recibida: " << f_sugerida << endl;
+                sem_post(sem_mutex);
+
+                if(esFraseCorrecta(frase_original,f_sugerida)){
+                    cout << "[Servidor] Frase sugerida correcta, finalizando partida." << endl;
+                    sem_wait(sem_mutex);
+                    juego->juego_terminado = true;
+                    juego->victoria = true;
+                    sem_post(sem_mutex);
+                    juego_terminado = true;
+                }
+                else {
+                    cout << "[Servidor] Frase sugerida incorrecta, restando intento." << endl;
+                    sem_wait(sem_mutex);
+                    if (--juego->intentos_restantes == 0) {
+                        juego->juego_terminado = true;
+                        juego_terminado = true;
+                    }
+                    sem_post(sem_mutex);
+                }
+                sem_post(sem_resultado_listo);
+            }
+        }
+
+        if (terminar_sig1) {
+            cout << "[Servidor] Terminación suave solicitada. Cerrando luego de la partida...\n";
+            break;
         }
     }
-    
 
-    cout << "[Servidor] Inicialización finalizada." << endl;
-
-
-
+    // Liberar recursos
     cout << "[Servidor] Finalizando, liberando recursos...\n";
+
     sem_close(sem_mutex);
     sem_close(sem_letra_lista);
     sem_close(sem_resultado_listo);
-
+    sem_close(sem_nuevo_cliente);
+    sem_close(sem_frase_lista);
+    sem_close(sem_opcion_lista);
+    sem_close(sem_inicio_op1);
+    sem_close(sem_inicio_op2);
+    sem_close(sem_frase_intento_lista);
 
     sem_unlink(SEM_MUTEX_NAME);
     sem_unlink(SEM_LETRA_LISTA_NAME);
     sem_unlink(SEM_RESULTADO_LISTO_NAME);
+    sem_unlink(SEM_NUEVO_CLIENTE_NAME);
+    sem_unlink(SEM_FRASE_LISTA_NAME);
+    sem_unlink(SEM_OPCION_LISTA_NAME);
+    sem_unlink(SEM_INICIO_1_NAME);
+    sem_unlink(SEM_INICIO_2_NAME);
+    sem_unlink(SEM_FRASE_I_NAME);
+
+
+    //libero el lockfile para permitir crear otro servidor
+    close(fd);
+    unlink("/tmp/ahorcado_server.lock");
+
 
     shmdt(data);
     shmctl(shmid, IPC_RMID, nullptr);
+
     return 0;
 }
