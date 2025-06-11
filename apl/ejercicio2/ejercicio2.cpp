@@ -33,10 +33,7 @@ std::condition_variable cv_buffer_not_empty; // condición para esperar a que el
 std::queue<std::string> buffer; // buffer para almacenar los nombres de archivos generados
 std::atomic<int> id_global{1};               // contador global de IDs
 std::atomic<int> paquetes_generados{0};  // contador de paquetes generados
-std::mutex mtx_resultados; // mutex para proteger el acceso a los resultados
-std::map<int, double> peso_por_sucursal; // acumulador de peso para el resumen por sucursal
 std::atomic<bool> produccion_finalizada{false}; // bandera para indicar si la producción ha finalizado
-std::atomic<int> paquetes_consumidos{0}; // contador de paquetes consumidos
 
 
 struct Args {
@@ -54,7 +51,7 @@ bool es_entero(const std::string& s) {
 void mostrar_ayuda() {
     std::cout << "Uso: ./ejercicio2 [opciones]\n"
               << "Opciones:\n"
-              << "  -d  --directorio <path>         Ruta del directorio a analizar (requerido)\n"
+              << "  -d  --directorio <path>         Ruta del directorio a analizar (Requerido)\n"
               << "  -g  --generadores <número>      Cantidad de threads a ejecutar concurrentemente para generar los archivos del directorio (Requerido)\n"
               << "  -c  --consumidores <número>     Cantidad de threads a ejecutar concurrentemente para procesar los archivos del directorio (Requerido)\n"
               << "  -p  --paquetes <número>         Cantidad de paquetes a generar (Requerido).\n"
@@ -67,14 +64,6 @@ bool inicializar_directorios(const std::string& path) {
         std::cerr << "Error: el directorio '" << path << "' no existe o no es un directorio válido.\n";
         return false; 
     }
-
-    // SOLO se eliminan los archivos .paq del directorio
-    // for (auto& p : fs::directory_iterator(path)) {
-
-    //     if (p.is_regular_file() && p.path().extension() == ".paq") {
-    //         fs::remove(p.path());
-    //     }
-    // }
 
     // elimina todos los archivos y subdirectorios dentro del directorio base
     for (const auto& entry : fs::directory_iterator(path)) {
@@ -123,7 +112,8 @@ void generador(int total_paquetes, string path_directorio) {
             paquetes_generados.fetch_add(1);
         } else {
             std::cerr << "Error al crear archivo: " << nombre_archivo << std::endl;
-            continue; // No continuar si no se pudo escribir
+            id_global.fetch_sub(1); // revertir el ID global si no se pudo crear el archivo
+            continue;
         }
 
         // esperar a que haya espacio en el buffer y bloquear el mutex
@@ -200,7 +190,6 @@ void consumidor(const std::string& path_directorio, std::map<int, std::pair<int,
             fs::path origen = archivo_path;
             fs::path destino = fs::path(path_directorio) / "procesados" / origen.filename();
             fs::rename(origen, destino);
-            paquetes_consumidos.fetch_add(1);
         } catch (const std::exception& e) {
             std::cerr << "Error moviendo archivo " << archivo_path << ": " << e.what() << "\n";
         }
@@ -266,7 +255,7 @@ int main(int argc, char* argv[]) {
     std::map<int, std::pair<int, double>> resumen_sucursal;
     std::mutex mtx_resumen;
 
-    //hilos consumidores primero
+    //hilos consumidores
     std::vector<std::thread> threads_consumidores;
     for (int i = 0; i < consumidores; ++i) {
         threads_consumidores.emplace_back(consumidor, directorio, std::ref(resumen_sucursal), std::ref(mtx_resumen));
