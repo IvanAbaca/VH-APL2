@@ -12,6 +12,18 @@ bool es_entero(const std::string& s) {
     return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
+std::string resolver_dns_a_ip(const std::string& hostname) {
+    struct hostent* host_info = gethostbyname(hostname.c_str());
+    if (host_info == nullptr) {
+        return hostname; // Si falla, devolver original
+    }
+    
+    // Convertir IP a string
+    char ip_str[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, host_info->h_addr_list[0], ip_str, INET_ADDRSTRLEN);
+    return std::string(ip_str);
+}
+
 void mostrar_ayuda() {
     std::cout << "Uso: ./cliente [opciones]\n"
               << "Opciones:\n"
@@ -83,13 +95,22 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    std::string ip_resuelta = resolver_dns_a_ip(ip_servidor);
+
     sockaddr_in servidor{};
     servidor.sin_family = AF_INET;
     servidor.sin_port = htons(puerto);
-    servidor.sin_addr.s_addr = inet_addr(ip_servidor.c_str());
+    servidor.sin_addr.s_addr = inet_addr(ip_resuelta.c_str());
 
     if (connect(cliente_fd, (sockaddr*)&servidor, sizeof(servidor)) < 0) {
-        std::cerr << "Error al conectar con el servidor\n";
+        
+        std::cerr << "❌ Error al conectar con el servidor " << ip_servidor;
+        if (ip_resuelta != ip_servidor) {
+            std::cerr << " (IP: " << ip_resuelta << ")";
+        }
+        std::cerr << ":" << puerto << "\n";
+        std::cerr << "💡 Verifica que el servidor esté ejecutándose y que la IP y puerto sean correctos.\n";
+        close(cliente_fd);
         return 1;
     }
 

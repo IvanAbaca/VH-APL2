@@ -16,7 +16,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["sh", "-c", "sleep 3 && ./cliente -n jugador -s ahorcado_servidor -p 5000"]
+    command: ["sh", "-c", "./cliente -n doss -s ahorcado_servidor -p 5000"]
     stdin_open: true
     tty: true
     depends_on:
