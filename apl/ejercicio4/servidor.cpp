@@ -1,5 +1,3 @@
-// servidor.cpp
-
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -11,7 +9,7 @@
 #include <cstdlib>
 #include <set>
 #include <fcntl.h>
-#include <sys/file.h>    // flock
+#include <sys/file.h> 
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -22,11 +20,11 @@
 
 using namespace std;
 
-// Para ranking completo:
+// Variables para el ranking completo:
 struct Result { string nick; double time; bool won; };
 static vector<Result> results;
 
-// Para señalización:
+// Variables para la señalización:
 static volatile sig_atomic_t terminate_now        = 0;
 static volatile sig_atomic_t terminate_when_free = 0;
 
@@ -51,13 +49,11 @@ void print_full_ranking_and_cleanup() {
     if (results.empty()) {
         cout << "No hubo partidas jugadas.\n";
     } else {
-        // Creamos una copia y la ordenamos:
+        
         auto sorted = results;
         sort(sorted.begin(), sorted.end(),
              [](const Result &a, const Result &b) {
-                 // Los ganadores van primero
                  if (a.won != b.won) return a.won > b.won;
-                 // Dentro de los ganadores (o perdedores), quien tardó menos primero
                  return a.time < b.time;
              });
 
@@ -108,7 +104,7 @@ bool is_fully_guessed(const char* masked_out) {
 }
 
 int main(int argc, char* argv[]) {
-    // 1) Args
+
     string file_phrases; int max_attempts=-1, opt;
     while((opt=getopt(argc,argv,"a:c:h"))!=-1){
         if(opt=='a') file_phrases=optarg;
@@ -119,7 +115,6 @@ int main(int argc, char* argv[]) {
         cerr<<"Parámetros obligatorios.\n"; return 1;
     }
 
-    // 2) Señales
     struct sigaction sa_int{}, sa_usr1{}, sa_usr2{};
     sa_int.sa_handler = sigint_handler;
     sa_usr1.sa_handler= sigusr1_handler;
@@ -131,7 +126,7 @@ int main(int argc, char* argv[]) {
     sigaction(SIGUSR1, &sa_usr1, nullptr);
     sigaction(SIGUSR2, &sa_usr2, nullptr);
 
-    // 3) Único servidor: semáforo + file-lock
+    // Verifico que no haya otro servidor corriendo
     sem_unlink(SEM_SERVER_LOCK);
     sem_server_lock = sem_open(SEM_SERVER_LOCK, O_CREAT|O_EXCL, 0600, 1);
     if (sem_server_lock==SEM_FAILED){
@@ -143,7 +138,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 4) Memoria compartida
+    // Memoria compartida
     shm_unlink(SHM_NAME);
     shm_fd = shm_open(SHM_NAME, O_CREAT|O_RDWR, 0600);
     ftruncate(shm_fd, sizeof(SharedData));
@@ -152,7 +147,7 @@ int main(int argc, char* argv[]) {
     shm_ptr = (SharedData*)addr;
     memset(shm_ptr,0,sizeof(SharedData));
 
-    // 5) Semáforos IPC
+    // Semáforos IPC
     sem_unlink(SEM_CLIENT_MUTEX);
     sem_unlink(SEM_CLIENT_READY);
     sem_unlink(SEM_PHRASE_READY);
@@ -168,7 +163,7 @@ int main(int argc, char* argv[]) {
         cerr<<"Error al crear semáforos.\n"; return 1;
     }
 
-    // 6) Cargo frases
+    // Cargo frases
     vector<string> phrases;
     if (!load_phrases(file_phrases,phrases)){
         cerr<<"No se cargaron frases.\n"; return 1;
@@ -177,7 +172,6 @@ int main(int argc, char* argv[]) {
     cout<<"Servidor iniciado. Esperando clientes...\n";
     srand(time(nullptr));
 
-    // 7) Bucle
     while(true){
         if (terminate_when_free && !game_in_progress) break;
 
@@ -202,10 +196,8 @@ int main(int argc, char* argv[]) {
         shm_ptr->game_state = 1;
         sem_post(sem_phrase_ready);
 
-        // Llevo letras usadas
         set<char> used_letters;
 
-        // Juego
         while(true){
             if (terminate_now){
                 shm_ptr->result=1; shm_ptr->game_state=3;
@@ -258,7 +250,7 @@ int main(int argc, char* argv[]) {
         if (terminate_when_free) break;
     }
 
-    // Cleanup final
+    // Limpieza final
     print_full_ranking_and_cleanup();
     sem_close(sem_server_lock);
     sem_close(sem_client_mutex);
