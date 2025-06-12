@@ -1,4 +1,4 @@
-all: clean servidor cliente clear
+all: clean servidor cliente
 
 servidor: servidor.cpp
 	g++ servidor.cpp -o servidor

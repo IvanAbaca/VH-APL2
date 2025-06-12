@@ -1,10 +1,10 @@
 all: clean ejercicio clear
 
 ejercicio: ejercicio1.cpp
-	g++ ejercicio1.cpp -o ejercicio
+	g++ ejercicio1.cpp -o ejercicio1
 
 clean:
-	rm -f ejercicio
+	rm -f ejercicio1
 
 clear:
 	clear
