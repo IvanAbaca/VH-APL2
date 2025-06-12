@@ -10,7 +10,7 @@
 #include <fcntl.h>      // O_* constantes
 #include <sys/mman.h>   // shm_*
 #include <sys/stat.h>   // mode constants
-#include <unistd.h>     // close
+#include <unistd.h>     // close, getopt
 #include <semaphore.h>  // sem_*
 
 #include "ahorcado_ipc.h"
@@ -20,7 +20,7 @@ using namespace std;
 // Para ignorar SIGINT (Ctrl-C)
 void sigint_handler(int signo) {
     (void)signo;
-    // No hace nada, simplemente evita que el proceso termine abruptamente
+    // no hace nada
 }
 
 int main(int argc, char* argv[]) {
@@ -46,11 +46,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 2) Ignoro SIGINT
+    // 2) Ignoro SIGINT con SA_RESTART
     struct sigaction sa_int{};
     sa_int.sa_handler = sigint_handler;
     sigemptyset(&sa_int.sa_mask);
-    sa_int.sa_flags   = 0;
+    sa_int.sa_flags   = SA_RESTART;
     sigaction(SIGINT, &sa_int, nullptr);
 
     // 3) Abro semáforos que el Servidor creó:
@@ -68,8 +68,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 4) Intento “conectarme”: 
-    //    sem_wait(client_mutex) para asegurar que no haya otro cliente.
+    // 4) Intento “conectarme”:
     if (sem_wait(sem_client_mutex) < 0) {
         perror("sem_wait(SEM_CLIENT_MUTEX)");
         return 1;
@@ -79,7 +78,7 @@ int main(int argc, char* argv[]) {
     int shm_fd = shm_open(SHM_NAME, O_RDWR, 0);
     if (shm_fd < 0) {
         cerr << "Error al abrir memoria compartida: ¿Servidor corriendo?\n";
-        sem_post(sem_client_mutex); // libero para posible próximo cliente
+        sem_post(sem_client_mutex);
         return 1;
     }
     void* addr = mmap(nullptr, sizeof(SharedData),
@@ -92,7 +91,7 @@ int main(int argc, char* argv[]) {
     }
     SharedData* shm_ptr = reinterpret_cast<SharedData*>(addr);
 
-    // 6) Escribo mi nickname en memoria compartida (primero pongo todo en 0 y luego copio):
+    // 6) Escribo mi nickname en memoria compartida:
     memset(shm_ptr->nickname, 0, MAX_NICK_LEN);
     strncpy(shm_ptr->nickname, nickname.c_str(), MAX_NICK_LEN - 1);
 
@@ -114,61 +113,50 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 9) Ya tengo la frase en shm_ptr->masked, intentos en shm_ptr->attempts_left, etc.
+    // 9) Inicio de juego
     cout << "=== ¡Juego del Ahorcado! ===\n";
     cout << "Jugador: " << nickname << "\n";
-    cout << "La frase a adivinar tiene " 
+    cout << "La frase a adivinar tiene "
          << strlen(shm_ptr->masked) << " caracteres.\n\n";
-
-    // Muestro estado inicial:
     cout << "Frase: " << shm_ptr->masked << "\n";
     cout << "Intentos restantes: " << shm_ptr->attempts_left << "\n";
 
     // 10) Bucle de interacción:
     while (true) {
-        if (shm_ptr->game_state == 3) {
-            // El servidor dictaminó que la partida terminó antes de que pidiera letra.
-            break;
-        }
+        if (shm_ptr->game_state == 3) break;
+
         cout << "\nIngrese una letra: ";
         string line;
         if (!getline(cin, line)) {
-            // EOF o error, forzamos salida
             cout << "\n(Saliendo del juego)\n";
             shm_ptr->guess = '\0';
-            sem_post(sem_letter); // avisamos al servidor que “nos fuimos”
+            sem_post(sem_letter);
             break;
         }
         if (line.empty()) {
             cout << "Debe ingresar al menos un caracter.\n";
             continue;
         }
+        if (line.size() > 1) {
+            cout << "Por favor ingrese solo UN caracter.\n";
+            continue;
+        }
         char letra = line[0];
-
-        // Coloco la letra en el struct
         shm_ptr->guess = letra;
 
-        // Mando señal al servidor: “ya puse letra”
         if (sem_post(sem_letter) < 0) {
             perror("sem_post(SEM_LETTER)");
             break;
         }
-
-        // Espero a que el servidor procese y haga post(SEM_UPDATE)
         if (sem_wait(sem_update) < 0) {
             perror("sem_wait(SEM_UPDATE)");
             break;
         }
 
-        // Ahora el servidor actualizó shm_ptr->masked y shm_ptr->attempts_left, 
-        // y tal vez game_state==3 indicando fin.
-
-        // Muestro estado:
         cout << "\nFrase: " << shm_ptr->masked << "\n";
         cout << "Intentos restantes: " << shm_ptr->attempts_left << "\n";
 
         if (shm_ptr->game_state == 3) {
-            // La partida terminó
             if (shm_ptr->result == 0) {
                 cout << "\n¡Felicidades, adivinaste la frase!\n";
             } else {
@@ -182,8 +170,6 @@ int main(int argc, char* argv[]) {
     // 11) Desconexión limpia:
     munmap(shm_ptr, sizeof(SharedData));
     close(shm_fd);
-
-    // Libero el mutex de cliente para que otro pueda entrar
     sem_post(sem_client_mutex);
 
     sem_close(sem_client_mutex);
