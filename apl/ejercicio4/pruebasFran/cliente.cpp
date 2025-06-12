@@ -2,7 +2,10 @@
 
 
 void help(){
-    cout << "Ayuda" << endl;
+            cout << "Uso: ./cliente [opciones]\n"
+              << "Opciones:\n"
+              << "  -n  --nickname <path>           Nickname del jugador (Requerido)\n"
+              << "  -h  --help                      Muestra esta ayuda\n";
 }
 
 

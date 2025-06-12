@@ -71,7 +71,11 @@ bool esFraseCorrecta(const string fraseOriginal, const string fraseSugerida) {
 }
 
 void help(){
-    cout << "Ayuda" << endl;
+        cout << "Uso: ./servidor [opciones]\n"
+              << "Opciones:\n"
+              << "  -a  --archivo <path>            Archivo de frases (Requerido)\n"
+              << "  -c  --cantidad <número>         Cantidad de intentos por partida (Requerido)\n"
+              << "  -h  --help                      Muestra esta ayuda\n";
 }
 
 
@@ -85,9 +89,9 @@ void mostrarRanking(const vector<rankingEntry>& ranking) {
     cout << "\n=========  RANKING DE JUGADORES  =========\n\n";
     cout << left << setw(5) << "#" 
          << setw(15) << "Jugador" 
-         << setw(25) << "Frase Adivinada" 
+         << setw(50) << "Frase Adivinada" 
          << setw(12) << "Tiempo (mm:ss)"
-         << "\n" << string(60, '-') << "\n";
+         << "\n" << string(85, '-') << "\n";  // 5 + 15 + 50 + 12 + extras
 
     for (size_t i = 0; i < ordenado.size(); ++i) {
         int minutos = static_cast<int>(ordenado[i].tiempo_segundos) / 60;
@@ -95,18 +99,19 @@ void mostrarRanking(const vector<rankingEntry>& ranking) {
 
         stringstream tiempo_formateado;
         tiempo_formateado << setfill('0') << setw(2) << minutos << ":"
-                        << fixed << setprecision(2)
-                        << setw(5) << segundos_restantes;
+                          << fixed << setprecision(2)
+                          << setw(5) << segundos_restantes;
 
         cout << left << setw(5) << (i + 1)
-            << setw(15) << ordenado[i].nickname
-            << setw(25) << ordenado[i].frase.substr(0, 24)
-            << setw(10) << tiempo_formateado.str()
-            << endl;
+             << setw(15) << ordenado[i].nickname
+             << setw(50) << ordenado[i].frase
+             << setw(12) << tiempo_formateado.str()
+             << endl;
     }
 
     cout << "\n==============================================\n";
 }
+
 
 
 int main(int argc, char* argv[]) {
