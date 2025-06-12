@@ -9,4 +9,4 @@
 # Casos exitosos
 ./servidor -i 3
 
-./cliente - a /home/marcopalmieri/documents/APL2/VH-APL2/apl/ejercicio3/archivos/arch1.txt
+./cliente -a /home/marcopalmieri/documents/APL2/VH-APL2/apl/ejercicio3/archivos/arch1.txt
