@@ -1,3 +1,21 @@
+# generar imagen
+docker build -t vh-apl2-image .
+
+# generar container
+docker run -it --name vh-apl2-container vh-apl2-image bash
+
+# ejecutar en container
+docker exec -it vh-apl2-container sh
+cd ./ejercicio5
+
+# Caso base Server
+./servidor -p 5000 -u 3 -a frases.txt
+
+# Caso base Cliente
+./cliente -n doss -p 5000 -s 127.0.0.1
+./cliente -n ecireneb -p 5000 -s 127.0.0.1
+./cliente -n asd -p 5000 -s 127.0.0.1
+
 # Casos de error que cubre:
 ./servidor -p 5000
 ./servidor -p -u 2 -a frases.txt
