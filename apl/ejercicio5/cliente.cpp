@@ -103,13 +103,7 @@ int main(int argc, char* argv[]) {
     servidor.sin_addr.s_addr = inet_addr(ip_resuelta.c_str());
 
     if (connect(cliente_fd, (sockaddr*)&servidor, sizeof(servidor)) < 0) {
-        
-        std::cerr << "❌ Error al conectar con el servidor " << ip_servidor;
-        if (ip_resuelta != ip_servidor) {
-            std::cerr << " (IP: " << ip_resuelta << ")";
-        }
-        std::cerr << ":" << puerto << "\n";
-        std::cerr << "💡 Verifica que el servidor esté ejecutándose y que la IP y puerto sean correctos.\n";
+        std::cerr << "Error al conectar con el servidor " << ip_servidor;
         close(cliente_fd);
         return 1;
     }
