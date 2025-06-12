@@ -13,9 +13,18 @@
 #include <sstream>
 #include <chrono>
 #include <signal.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <semaphore.h>
 
 #define PUERTO 5000
 #define BUFFER_SIZE 1024
+#define NombreMemoria "memoriaAhorcado"
+#define SemServerUnico "semServerUnico"
+
+int* memoria = nullptr; 
+size_t tam = 1024; 
 
 enum EstadoJugador {
     ESPERANDO,
@@ -562,6 +571,9 @@ void manejador_senales(int signal) {
         case SIGINT:
             std::cout << "\n[SEÑAL] SIGINT recibida - Cerrando servidor..." << std::endl;
             servidor_corriendo = false;
+            sem_unlink(SemServerUnico);
+            munmap(memoria, tam);
+            shm_unlink(NombreMemoria);
             exit(0);
             break;
             
@@ -570,6 +582,9 @@ void manejador_senales(int signal) {
             if (estado_servidor != SERVIDOR_JUGANDO) {
                 std::cout << "\n[SEÑAL] SIGUSR1 - No hay partidas en curso, finalizando..." << std::endl;
                 servidor_corriendo = false;
+                sem_unlink(SemServerUnico);
+                munmap(memoria, tam);
+                shm_unlink(NombreMemoria);
                 exit(0);
             } else {
                 std::cout << "\n[SEÑAL] SIGUSR1 - Hay partidas en curso, ignorando..." << std::endl;
@@ -596,6 +611,9 @@ void manejador_senales(int signal) {
                 
                 // Mostrar resultados en servidor y terminar
                 enviar_resultados_finales();
+                sem_unlink(SemServerUnico);
+                munmap(memoria, tam);
+                shm_unlink(NombreMemoria);
                 exit(0);
             } else {
                 std::cout << "\n[SEÑAL] SIGUSR2 - No hay partidas en curso" << std::endl;
@@ -615,6 +633,13 @@ void setup_signal_handlers() {
 int main(int argc, char* argv[]) {
     // Configurar señales al inicio
     setup_signal_handlers();
+
+    int idMemoria = shm_open(NombreMemoria, O_CREAT | O_RDWR, 0600); // Creo o abro una referencia al espacio de memoria que quiero usar.
+    ftruncate(idMemoria, tam); // Le asigno su tamanio.
+    memoria = (int*)mmap(NULL, tam, PROT_READ | PROT_WRITE, MAP_SHARED, idMemoria, 0); // Mapeamos la memoria a nuestro proceso.
+    close(idMemoria);
+
+    sem_t* semServerUnico = sem_open(SemServerUnico, O_CREAT, 0600, 1);
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -665,9 +690,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    if(sem_trywait(semServerUnico) != 0)
+    {
+        std::cout << "Ya existe un proceso servidor corriendo en la computadora." << std::endl;
+        exit(1);
+    }
+
     std::ifstream prueba(archivo_frases);
     if (!prueba.is_open()) {
         std::cerr << "Error: no se pudo abrir el archivo de frases: " << archivo_frases << "\n";
+        sem_unlink(SemServerUnico);
+        munmap(memoria, tam);
+        shm_unlink(NombreMemoria);
         return 1;
     }
     prueba.close();
@@ -675,6 +709,9 @@ int main(int argc, char* argv[]) {
     int servidor_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (servidor_fd == -1) {
         std::cerr << "Error al crear socket\n";
+        sem_unlink(SemServerUnico);
+        munmap(memoria, tam);
+        shm_unlink(NombreMemoria);
         return 1;
     }
 
@@ -685,11 +722,17 @@ int main(int argc, char* argv[]) {
 
     if (bind(servidor_fd, (sockaddr*)&direccion, sizeof(direccion)) < 0) {
         std::cerr << "Error en bind()\n";
+        sem_unlink(SemServerUnico);
+        munmap(memoria, tam);
+        shm_unlink(NombreMemoria);
         return 1;
     }
 
     if (listen(servidor_fd, max_usuarios) < 0) {
         std::cerr << "Error en listen()\n";
+        sem_unlink(SemServerUnico);
+        munmap(memoria, tam);
+        shm_unlink(NombreMemoria);
         return 1;
     }
 
@@ -720,6 +763,9 @@ int main(int argc, char* argv[]) {
         hilo_cliente.detach();
     }
 
+    sem_unlink(SemServerUnico);
+    munmap(memoria, tam);
+    shm_unlink(NombreMemoria);
     close(servidor_fd);
     return 0;
 }

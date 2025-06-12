@@ -1,22 +1,25 @@
-# Usar imagen base de Ubuntu con herramientas de desarrollo
+# Imagen base recomendada
 FROM ubuntu:24.10
 
-# Instalar dependencias necesarias
-RUN apt-get update && apt-get install -y \
-    g++ \
-    make \
-    && rm -rf /var/lib/apt/lists/*
+# Actualizar el sistema e instalar dependencias necesarias
+RUN apt-get update && \
+apt-get install -y build-essential
 
-# Crear directorio de trabajo
-WORKDIR /app
+# Crear el directorio /apl dentro del contenedor
+RUN mkdir /apl
 
-# Copiar archivos específicos del ejercicio5
-COPY ejercicio5/ .
+# Copiar todo el contenido del trabajo práctico al contenedor
+COPY . /apl
 
-# Compilar el proyecto (sin clear)
-RUN make clean
-RUN g++ servidor.cpp -o servidor -pthread
-RUN g++ cliente.cpp -o cliente
+# Establecer el directorio de trabajo
+WORKDIR /apl
 
-# Exponer el puerto por defecto
-EXPOSE 5000
+# Compilar todos los ejercicios
+# RUN make -C ejercicio1
+# RUN make -C ejercicio2
+# RUN make -C ejercicio3
+# RUN make -C ejercicio4
+RUN make -C ejercicio5
+
+# Comando por defecto al iniciar el contenedor
+CMD ["tail", "-f", "/dev/null"]
