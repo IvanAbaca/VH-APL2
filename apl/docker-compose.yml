@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  ejercicio5:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    command: ["./servidor", "-p", "5000", "-u", "10", "-a", "frases.txt"]
+    stdin_open: true
+    tty: true
+    
+  cliente5:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - ejercicio5
+    command: ["./cliente", "-n", "jugador1", "-s", "ejercicio5", "-p", "5000"]
+    stdin_open: true
+    tty: true
+    profiles:
+      - cliente
