@@ -13,11 +13,10 @@ WORKDIR /app
 # Copiar archivos específicos del ejercicio5
 COPY ejercicio5/ .
 
-# Compilar el proyecto
-RUN make clean && make
+# Compilar el proyecto (sin clear)
+RUN make clean
+RUN g++ servidor.cpp -o servidor -pthread
+RUN g++ cliente.cpp -o cliente
 
 # Exponer el puerto por defecto
 EXPOSE 5000
-
-# Comando por defecto
-CMD ["./servidor", "-p", "5000", "-u", "5", "-a", "frases.txt"]

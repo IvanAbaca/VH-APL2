@@ -4,6 +4,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <algorithm>
+#include <netdb.h>
 
 #define BUFFER_SIZE 1024
 
