@@ -247,7 +247,7 @@ int main(int argc, char* argv[]) {
 
     }
 
-    if (directorio_set == false || paquetes_set == false|| generadores_set == false || consumidores_set == false) {
+    if (!directorio_set || !paquetes_set|| !generadores_set|| !consumidores_set) {
     std::cerr << "Error: faltan argumentos requeridos.\n";
     mostrar_ayuda();
     return EXIT_FAILURE;
@@ -255,6 +255,11 @@ int main(int argc, char* argv[]) {
 
     if (consumidores < 1) {
     std::cerr << "Error: debe haber al menos 1 consumidor.\n";
+    return EXIT_FAILURE;
+    }
+
+    if (generadores < 1) {
+    std::cerr << "Error: debe haber al menos 1 generador.\n";
     return EXIT_FAILURE;
     }
 
