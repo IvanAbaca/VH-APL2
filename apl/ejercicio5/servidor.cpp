@@ -747,7 +747,6 @@ int main(int argc, char* argv[]) {
     std::cout << "Servidor escuchando en el puerto " << puerto << "...\n";
     std::cout << "🆔 PID del servidor: " << getpid() << "\n";
     std::cout << "📋 Comandos de control:\n";
-    std::cout << "   • Ctrl-C o kill -INT " << getpid() << "  → Cierre inmediato\n";
     std::cout << "   • kill -USR1 " << getpid() << "       → Cierre si no hay partidas\n";
     std::cout << "   • kill -USR2 " << getpid() << "       → Terminar partidas y cerrar\n";
     std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
