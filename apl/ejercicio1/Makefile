@@ -1,4 +1,4 @@
-all: clean ejercicio clear
+all: clean ejercicio
 
 ejercicio: ejercicio1.cpp
 	g++ ejercicio1.cpp -o ejercicio1
