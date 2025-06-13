@@ -49,7 +49,7 @@ bool es_entero(const std::string& s) {
 
 // -------- Ayuda y parámetros por línea de comandos ------------
 void mostrar_ayuda() {
-    std::cout << "Uso: ./ejercicio2 [opciones]\n"
+    std::cout << "Uso: ./ejercicio2 -d <directorio> -g <cant. generadores> -c <cant. consumidores> -p <cant. paquetes>\n"
               << "Opciones:\n"
               << "  -d  --directorio <path>         Ruta del directorio a analizar (Requerido)\n"
               << "  -g  --generadores <número>      Cantidad de threads a ejecutar concurrentemente para generar los archivos del directorio (Requerido)\n"
@@ -244,6 +244,18 @@ int main(int argc, char* argv[]) {
             mostrar_ayuda();
             return EXIT_FAILURE;
         }
+
+    }
+
+    if (directorio_set == false || paquetes_set == false|| generadores_set == false || consumidores_set == false) {
+    std::cerr << "Error: faltan argumentos requeridos.\n";
+    mostrar_ayuda();
+    return EXIT_FAILURE;
+    }
+
+    if (consumidores < 1) {
+    std::cerr << "Error: debe haber al menos 1 consumidor.\n";
+    return EXIT_FAILURE;
     }
 
     //inicialización de directorio (acá también hace la validación de que el directorio exista)
