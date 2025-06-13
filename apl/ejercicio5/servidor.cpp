@@ -577,12 +577,7 @@ bool es_entero(const std::string& s) {
 void manejador_senales(int signal) {
     switch(signal) {
         case SIGINT:
-            std::cout << "\n[SEÑAL] SIGINT recibida - Cerrando servidor..." << std::endl;
-            servidor_corriendo = false;
-            sem_unlink(SemServerUnico);
-            munmap(memoria, tam);
-            shm_unlink(NombreMemoria);
-            exit(0);
+            std::cout << "\n[SEÑAL] SIGINT recibida - Ignorando..." << std::endl;
             break;
             
         case SIGUSR1: {
