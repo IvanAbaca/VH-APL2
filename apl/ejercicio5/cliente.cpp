@@ -13,8 +13,16 @@
 #include <arpa/inet.h>
 #include <algorithm>
 #include <netdb.h>
+#include <signal.h>  // Agregado para manejo de señales
 
 #define BUFFER_SIZE 1024
+
+// Manejador de señales SIGINT
+void manejador_sigint(int sig) {
+    // Simplemente ignora la señal - no hace nada
+    // Opcionalmente puedes mostrar un mensaje
+    std::cout << "\n[SIGINT ignorado - usa comandos del juego para salir]\n";
+}
 
 bool es_entero(const std::string& s) {
     return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
@@ -30,6 +38,9 @@ void mostrar_ayuda() {
 }
 
 int main(int argc, char* argv[]) {
+    // Configurar el manejador de señales SIGINT al inicio del programa
+    signal(SIGINT, manejador_sigint);
+    
     std::string nickname, ip_servidor;
     int puerto = -1;
     bool nickname_set = false, puerto_set = false, ip_set = false;
