@@ -21,7 +21,7 @@
 void manejador_sigint(int sig) {
     // Simplemente ignora la señal - no hace nada
     // Opcionalmente puedes mostrar un mensaje
-    std::cout << "\n[SIGINT ignorado - usa comandos del juego para salir]\n";
+    std::cout << "\n[SIGINT ignorado]\n";
 }
 
 bool es_entero(const std::string& s) {
