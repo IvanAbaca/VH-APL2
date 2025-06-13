@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <csignal>
+#include <algorithm>
 
 #define FIFO_IMPRESION "/tmp/cola_impresion"
 #define LOG_PATH "/tmp/impresiones.log"
@@ -33,6 +34,10 @@ void mostrar_ayuda(const char* nombre_programa) {
     cout << "Opciones:\n";
     cout << "  -i, --impresiones    Cantidad de archivos a imprimir (requerido)\n";
     cout << "  -h, --help           Muestra esta ayuda\n";
+}
+
+bool es_entero(const std::string& s) {
+    return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
 // Función auxiliar para obtener timestamp
@@ -112,6 +117,10 @@ int main(int argc, char* argv[]) {
             return EXIT_SUCCESS;
         }
         if ((arg == "-i" || arg == "--impresiones") && i + 1 < argc) {
+            if (!es_entero(argv[++i])) {
+                std::cerr << "Error: el numero de paquetes debe ser un número entero.\n";
+                return EXIT_FAILURE;
+            }
             cantidad_trabajos = stoi(argv[++i]);
         } else {
             cerr << "Argumento desconocido: " << arg << "\n";
