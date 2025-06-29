@@ -125,11 +125,12 @@ int main(int argc, char* argv[]) {
             return EXIT_SUCCESS;
         }
         if ((arg == "-i" || arg == "--impresiones") && i + 1 < argc) {
-            if (!es_entero(argv[++i])) {
-                std::cerr << "Error: el numero de paquetes debe ser un número entero.\n";
+            string valor = argv[++i];
+            if (!es_entero(valor)) {
+                cerr << "Error: el numero de paquetes debe ser un número entero.\n";
                 return EXIT_FAILURE;
             }
-            cantidad_trabajos = stoi(argv[++i]);
+            cantidad_trabajos = stoi(valor);
         } else {
             cerr << "Argumento desconocido: " << arg << "\n";
             mostrar_ayuda(argv[0]);
