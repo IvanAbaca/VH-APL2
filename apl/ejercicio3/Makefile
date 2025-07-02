@@ -8,6 +8,3 @@ cliente: cliente.cpp
 
 clean:
 	rm -f servidor cliente
-
-clear:
-	clear

@@ -1,5 +1,4 @@
 # Casos de error que cubre:
-./cliente -h -a ==> muestra help
 ./cliente -a -h ==> archivo no existe
 
 ./servidor --i 3
