@@ -5,6 +5,7 @@
 
 volatile sig_atomic_t terminar_sig1 = 0;
 volatile sig_atomic_t terminar_sig2 = 0;
+juegoCompartido* juego;
 
 
 void handle_sigusr1(int) { terminar_sig1 = 1; }
@@ -79,6 +80,34 @@ void help(){
 }
 
 
+bool esperaCliente(sem_t* sem,sem_t* mutex){ //funcion a la que le pasas el semaforo que queres esperar y el mutex para el acceso a la shm, para verificar si el cliente sigue activo
+        while (true)
+        {
+                timespec ts;
+                clock_gettime(CLOCK_REALTIME, &ts);
+                ts.tv_sec +=5;
+                int wait_result = sem_timedwait(sem,&ts);
+                if(wait_result == -1 && errno == ETIMEDOUT){
+                    cout << "[Servidor] TIMEOUT" << endl;
+                    bool desconectado = false;
+                    sem_wait(mutex);
+                    desconectado = (kill(juego->pid_cliente,0) == -1);                
+                    sem_post(mutex);
+    
+                    if(desconectado){
+                        cout << "[Servidor] Muerte detectada" << endl;
+                        return true;
+                    }
+                    continue;
+                }
+                else if (wait_result != -1){
+                    cout << "[Servidor] Espera finalizada" << endl;
+                    return false;
+                }
+            }
+}
+
+
 void mostrarRanking(const vector<rankingEntry>& ranking) {
 
     vector<rankingEntry> ordenado = ranking;
@@ -91,7 +120,7 @@ void mostrarRanking(const vector<rankingEntry>& ranking) {
          << setw(15) << "Jugador" 
          << setw(50) << "Frase Adivinada" 
          << setw(12) << "Tiempo (mm:ss)"
-         << "\n" << string(85, '-') << "\n";  // 5 + 15 + 50 + 12 + extras
+         << "\n" << string(85, '-') << "\n";
 
     for (size_t i = 0; i < ordenado.size(); ++i) {
         int minutos = static_cast<int>(ordenado[i].tiempo_segundos) / 60;
@@ -165,6 +194,7 @@ int main(int argc, char* argv[]) {
     srand(time(nullptr));
 
     // Registrar señales
+    signal(SIGINT,SIG_IGN);
     signal(SIGUSR1, handle_sigusr1);
     signal(SIGUSR2, handle_sigusr2);
 
@@ -172,7 +202,7 @@ int main(int argc, char* argv[]) {
     key_t key = ftok("shmfile", 65);
     int shmid = shmget(key, SHM_SIZE, 0666 | IPC_CREAT);
     void* data = shmat(shmid, nullptr, 0);
-    juegoCompartido* juego = static_cast<juegoCompartido*>(data);
+    juego = static_cast<juegoCompartido*>(data);
 
     sem_t* sem_mutex = sem_open(SEM_MUTEX_NAME, O_CREAT, 0666, 1);
     sem_t* sem_letra_lista = sem_open(SEM_LETRA_LISTA_NAME, O_CREAT, 0666, 0);
@@ -236,14 +266,33 @@ int main(int argc, char* argv[]) {
                 break;
             }
 
-            sem_wait(sem_opcion_lista);
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_sec +=5;
+            wait_result = sem_timedwait(sem_opcion_lista,&ts);
+            if(wait_result == -1 && errno == ETIMEDOUT){
+                cout << "[Servidor] TIMEOUT" << endl;
+                bool desconectado = false;
+                sem_wait(sem_mutex);
+                desconectado = (kill(juego->pid_cliente,0) == -1);                
+                sem_post(sem_mutex);
+
+                if(desconectado){
+                    cout << "[Servidor] Muerte detectada" << endl;
+                    juego_terminado = true;
+                }
+                continue;
+            }
 
             switch (juego->opcion) {
                 //opcion 1: adivinar letra
                 case '1': {
                     sem_post(sem_inicio_op1);
-                    sem_wait(sem_letra_lista);
 
+                    //sem_wait(sem_letra_lista);
+                    juego_terminado = esperaCliente(sem_letra_lista,sem_mutex);
+                    if(juego_terminado){
+                        break;
+                    }
                     sem_wait(sem_mutex);
                     char letra = juego->letra_sugerida;
                     sem_post(sem_mutex);
@@ -273,7 +322,12 @@ int main(int argc, char* argv[]) {
                 //opcion 2: adivinar frase 
                 case '2': {
                     sem_post(sem_inicio_op2);
-                    sem_wait(sem_frase_intento_lista);
+                    //sem_wait(sem_frase_intento_lista);
+
+                    juego_terminado = esperaCliente(sem_frase_intento_lista,sem_mutex);
+                    if(juego_terminado){
+                        break;
+                    }
 
                     char f_sugerida[128];
                     sem_wait(sem_mutex);
@@ -320,7 +374,11 @@ int main(int argc, char* argv[]) {
             }
         }
         
-        ranking.push_back(jugador);
+        sem_wait(sem_mutex);
+        if(juego->victoria){
+            ranking.push_back(jugador);
+        }
+        sem_post(sem_mutex);
 
         if (terminar_sig1) {
             cout << "[Servidor] Terminación suave solicitada. Cerrando luego de la partida...\n";

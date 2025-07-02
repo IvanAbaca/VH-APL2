@@ -46,6 +46,7 @@ struct juegoCompartido {
     bool letra_disponible;
     bool juego_terminado;
     bool victoria;
+    pid_t pid_cliente;
 };
 
 struct rankingEntry {
