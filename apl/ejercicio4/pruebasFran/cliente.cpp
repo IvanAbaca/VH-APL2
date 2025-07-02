@@ -171,10 +171,23 @@ int main(int argc, char* argv[]) {
             case '1': {
                 sem_wait(sem_inicio_1); 
 
+                /*
                 cout << "Ingrese una letra: ";
                 do {
                     getline(cin, letraS);
                 } while (letraS.empty()); 
+                letra = letraS[0];
+                */
+
+                do{
+                    cout << "Ingrese una letra: ";
+                    getline(cin,letraS);
+
+                    if(letraS.size() != 1){
+                        cout << "Error: debe ingresar exactamente un carácter" << endl;
+                    }
+                } while(letraS.size() != 1);
+
                 letra = letraS[0];
 
                 cout << "Enviando letra: " << letra << "\n";
