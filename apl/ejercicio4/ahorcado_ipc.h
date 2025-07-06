@@ -1,41 +1,59 @@
-// ahorcado_ipc.h
+#ifndef AHORCADO_H
+#define AHORCADO_H
 
-#ifndef AHORCADO_IPC_H
-#define AHORCADO_IPC_H
+#define SEM_MUTEX_NAME "/sem_mutex"
+#define SEM_LETRA_LISTA_NAME "/sem_letra_lista"
+#define SEM_RESULTADO_LISTO_NAME "/sem_resultado_listo"
+#define SEM_FRASE_LISTA_NAME "/sem_frase_lista"
+#define SEM_NUEVO_CLIENTE_NAME "/sem_nuevo_cliente"
+#define SEM_OPCION_LISTA_NAME "/sem_opcion_lista"
+#define SEM_INICIO_1_NAME "/sem_inicio_1"
+#define SEM_INICIO_2_NAME "/sem_inicio_2"
+#define SEM_FRASE_I_NAME "/sem_frase_intento"
 
-#include <ctime>
+#include <chrono>
+#include <iostream>
+#include <csignal>
+#include <sys/ipc.h>
+#include <sys/shm.h>
 #include <cstring>
+#include <unistd.h>
+#include <vector>
+#include <fstream>
+#include <cstdlib>
+#include <ctime>
+#include <semaphore.h>
+#include <fcntl.h>
+#include <limits>
+#include <algorithm>
+#include <cctype>
+#include <iomanip>
 
-static constexpr const char* SHM_NAME        = "/ahorcado_shm";
-static constexpr const char* SEM_SERVER_LOCK = "/sem_ahorcado_server_lock";
-static constexpr const char* SEM_CLIENT_MUTEX= "/sem_ahorcado_client_mutex";
-static constexpr const char* SEM_CLIENT_READY= "/sem_ahorcado_client_ready";
-static constexpr const char* SEM_PHRASE_READY= "/sem_ahorcado_phrase_ready";
-static constexpr const char* SEM_LETTER      = "/sem_ahorcado_letter";
-static constexpr const char* SEM_UPDATE      = "/sem_ahorcado_update";
 
-static constexpr int MAX_PHRASE_LEN  = 256;
-static constexpr int MAX_NICK_LEN    = 32;
 
-// game_state: indica en qué paso está el juego
-//   0 = esperando frase lista (cliente todavía no recibió nada)
-//   1 = frase enviada y esperando letra del cliente
-//   2 = actualización de estado lista (Servidor ya procesó letra)
-//   3 = juego terminado, resultado disponible
-// result: válido sólo si game_state == 3
-//   0 = ganó el cliente
-//   1 = se acabaron los intentos (cliente perdió)
-struct SharedData {
-    char    nickname[MAX_NICK_LEN];    // Nickname del cliente
-    char    phrase[MAX_PHRASE_LEN];    // Frase completa a adivinar
-    char    masked[MAX_PHRASE_LEN];    // Frase con guiones bajos y letras adivinadas
-    char    guess;                     // Letra enviada por el cliente
-    int     attempts_left;             // Intentos que quedan
-    int     max_attempts;              // Cantidad inicial de intentos (se copia desde parámetro)
-    int     game_state;                // Estado del juego (ver arriba)
-    int     result;                    // Resultado final (0=win, 1=lose), válido si game_state==3
-    time_t  start_time;                // Timestamp al inicio de la partida
-    time_t  end_time;                  // Timestamp al final de la partida
+#define SHM_SIZE 1024
+
+using namespace std;
+
+struct juegoCompartido {
+    char frase[128];
+    char progreso[128];
+    char frase_sugerida[128];
+    char letra_sugerida;
+    char usuario_nickname[128];
+    char opcion;
+    int intentos_restantes;
+    bool letra_disponible;
+    bool juego_terminado;
+    bool victoria;
+    pid_t pid_cliente;
 };
 
-#endif // AHORCADO_IPC_H
+struct rankingEntry {
+    string nickname;
+    string frase;
+    double tiempo_segundos;
+};
+
+
+#endif //AHORCADO_H
