@@ -397,10 +397,6 @@ void* partida_jugador(void* arg) {
 
                 if (todos_finalizados) {
                     enviar_resultados_finales();
-                } else {
-                    // Si no todos terminaron, cerramos este socket individualmente
-                    close(jugador->socket_fd);
-                    jugador->socket_fd = -1;
                 }
             }
 
