@@ -29,8 +29,6 @@
 #include <cctype>
 #include <iomanip>
 
-
-
 #define SHM_SIZE 1024
 
 using namespace std;
