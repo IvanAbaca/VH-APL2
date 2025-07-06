@@ -1,3 +1,5 @@
+// ahorcado_ipc.h
+
 #ifndef AHORCADO_IPC_H
 #define AHORCADO_IPC_H
 
@@ -36,4 +38,4 @@ struct SharedData {
     time_t  end_time;                  // Timestamp al final de la partida
 };
 
-#endif
+#endif // AHORCADO_IPC_H
