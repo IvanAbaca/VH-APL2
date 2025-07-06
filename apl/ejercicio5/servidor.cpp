@@ -755,6 +755,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    int opt = 1;
+    setsockopt(servidor_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+
     sockaddr_in direccion{};
     direccion.sin_family = AF_INET;
     direccion.sin_addr.s_addr = INADDR_ANY;

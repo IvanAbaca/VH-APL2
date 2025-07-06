@@ -121,6 +121,7 @@ int main(int argc, char* argv[]) {
     servidor.sin_addr.s_addr = inet_addr(ip_servidor.c_str());
 
     if (connect(cliente_fd, (sockaddr*)&servidor, sizeof(servidor)) < 0) {
+        close(cliente_fd);
         std::cerr << "Error al conectar con el servidor\n";
         return 1;
     }
@@ -139,6 +140,7 @@ int main(int argc, char* argv[]) {
         if (respuesta.find("Error") != std::string::npos ||
             respuesta.find("rechazada") != std::string::npos ||
             respuesta.find("El juego ya ha comenzado") != std::string::npos) {
+            close(cliente_fd);
             std::cout << "Conexión finalizada.\n";
             close(cliente_fd);
             return 0;
