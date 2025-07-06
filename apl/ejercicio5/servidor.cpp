@@ -21,18 +21,15 @@
 #include <sstream>
 #include <chrono>
 #include <signal.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
+#include <sys/file.h>
 #include <fcntl.h>
-#include <semaphore.h>
+#include <errno.h>
 
 #define PUERTO 5000
 #define BUFFER_SIZE 1024
-#define NombreMemoria "memoriaAhorcado"
-#define SemServerUnico "semServerUnico"
+#define LOCKFILE_PATH "/tmp/servidor_ahorcado.lock"
 
-int* memoria = nullptr; 
-size_t tam = 1024; 
+int lockfile_fd = -1;  // Variable global para el file descriptor del lockfile
 
 enum EstadoJugador {
     ESPERANDO,
@@ -60,6 +57,7 @@ struct Jugador {
 int puerto = -1;
 int max_usuarios = -1;
 int max_errores = 7;
+int servidor_fd = -1;  // Socket del servidor (global para cleanup)
 std::vector<Jugador> jugadores;
 std::mutex mutex_jugadores;
 EstadoServidor estado_servidor = SERVIDOR_ESPERANDO_CONEXIONES;
@@ -67,6 +65,18 @@ std::string frase_global;
 std::string archivo_frases;
 bool puerto_set = false, usuarios_set = false, archivo_set = false;
 bool servidor_corriendo = true;
+
+void cleanup_lockfile() {
+    if (servidor_fd != -1) {
+        close(servidor_fd);
+        servidor_fd = -1;
+    }
+    if (lockfile_fd != -1) {
+        close(lockfile_fd);
+        unlink(LOCKFILE_PATH);
+        lockfile_fd = -1;
+    }
+}
 
 bool validar_frase(const std::string& frase) {
     if (frase.empty()) return false;
@@ -168,6 +178,14 @@ void verificar_jugadores_listos() {
 
 void reiniciar_servidor() {
     std::cout << "\n♻️ Reiniciando servidor para nueva partida...\n";
+
+    // Cerrar cualquier socket que pueda haber quedado abierto
+    for (auto& j : jugadores) {
+        if (j.socket_fd != -1) {
+            close(j.socket_fd);
+            j.socket_fd = -1;
+        }
+    }
 
     jugadores.clear();
     estado_servidor = SERVIDOR_ESPERANDO_CONEXIONES;
@@ -379,6 +397,10 @@ void* partida_jugador(void* arg) {
 
                 if (todos_finalizados) {
                     enviar_resultados_finales();
+                } else {
+                    // Si no todos terminaron, cerramos este socket individualmente
+                    close(jugador->socket_fd);
+                    jugador->socket_fd = -1;
                 }
             }
 
@@ -400,6 +422,10 @@ void* partida_jugador(void* arg) {
 
                 if (todos_finalizados) {
                     enviar_resultados_finales();
+                } else {
+                    // Si no todos terminaron, cerramos este socket individualmente
+                    close(jugador->socket_fd);
+                    jugador->socket_fd = -1;
                 }
             }
 
@@ -585,9 +611,7 @@ void manejador_senales(int signal) {
             if (estado_servidor != SERVIDOR_JUGANDO) {
                 std::cout << "\n[SEÑAL] SIGUSR1 - No hay partidas en curso, finalizando..." << std::endl;
                 servidor_corriendo = false;
-                sem_unlink(SemServerUnico);
-                munmap(memoria, tam);
-                shm_unlink(NombreMemoria);
+                cleanup_lockfile();
                 exit(0);
             } else {
                 std::cout << "\n[SEÑAL] SIGUSR1 - Hay partidas en curso, ignorando..." << std::endl;
@@ -595,10 +619,13 @@ void manejador_senales(int signal) {
             break;
         }
         
-        case SIGUSR2: {
+        case SIGUSR2:
+        case SIGTERM: {
             std::lock_guard<std::mutex> lock(mutex_jugadores);
+            std::string signal_name = (signal == SIGUSR2) ? "SIGUSR2" : "SIGTERM";
+            
             if (estado_servidor == SERVIDOR_JUGANDO) {
-                std::cout << "\n[SEÑAL] SIGUSR2 - Finalizando partidas en curso..." << std::endl;
+                std::cout << "\n[SEÑAL] " << signal_name << " - Finalizando partidas en curso..." << std::endl;
                 
                 // Notificar a todos los jugadores activos y cerrar conexiones
                 for (auto& jugador : jugadores) {
@@ -614,12 +641,12 @@ void manejador_senales(int signal) {
                 
                 // Mostrar resultados en servidor y terminar
                 enviar_resultados_finales();
-                sem_unlink(SemServerUnico);
-                munmap(memoria, tam);
-                shm_unlink(NombreMemoria);
+                cleanup_lockfile();
                 exit(0);
             } else {
-                std::cout << "\n[SEÑAL] SIGUSR2 - No hay partidas en curso" << std::endl;
+                std::cout << "\n[SEÑAL] " << signal_name << " - Terminando servidor..." << std::endl;
+                cleanup_lockfile();
+                exit(0);
             }
             break;
         }
@@ -630,6 +657,7 @@ void setup_signal_handlers() {
     signal(SIGINT, manejador_senales);
     signal(SIGUSR1, manejador_senales);
     signal(SIGUSR2, manejador_senales);
+    signal(SIGTERM, manejador_senales);
     signal(SIGPIPE, SIG_IGN); // Ignorar SIGPIPE
 }
 
@@ -637,23 +665,37 @@ int main(int argc, char* argv[]) {
     // Configurar señales al inicio
     setup_signal_handlers();
 
-    int idMemoria = shm_open(NombreMemoria, O_CREAT | O_RDWR, 0600); // Creo o abro una referencia al espacio de memoria que quiero usar.
-    ftruncate(idMemoria, tam); // Le asigno su tamanio.
-    memoria = (int*)mmap(NULL, tam, PROT_READ | PROT_WRITE, MAP_SHARED, idMemoria, 0); // Mapeamos la memoria a nuestro proceso.
-    close(idMemoria);
+    // Crear y obtener lock del archivo
+    lockfile_fd = open(LOCKFILE_PATH, O_CREAT | O_RDWR, 0644);
+    if (lockfile_fd == -1) {
+        std::cerr << "Error al crear lockfile: " << strerror(errno) << "\n";
+        return 1;
+    }
 
-    sem_t* semServerUnico = sem_open(SemServerUnico, O_CREAT, 0600, 1);
-    
+    // Intentar obtener lock exclusivo sin bloquear
+    if (flock(lockfile_fd, LOCK_EX | LOCK_NB) == -1) {
+        if (errno == EWOULDBLOCK) {
+            std::cerr << "Ya existe un proceso servidor corriendo en la computadora.\n";
+        } else {
+            std::cerr << "Error al obtener lock: " << strerror(errno) << "\n";
+        }
+        close(lockfile_fd);
+        return 1;
+    }
+
+    // Procesamiento de argumentos
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
 
         if (arg == "-h" || arg == "--help") {
             mostrar_ayuda();
+            cleanup_lockfile();
             return 0;
         } else if ((arg == "-p" || arg == "--puerto") && i + 1 < argc) {
             std::string valor = argv[++i];
             if (!es_entero(valor)) {
                 std::cerr << "Error: el puerto debe ser un número entero.\n";
+                cleanup_lockfile();
                 return 1;
             }
             puerto = std::stoi(valor);
@@ -662,6 +704,7 @@ int main(int argc, char* argv[]) {
             std::string valor = argv[++i];
             if (!es_entero(valor)) {
                 std::cerr << "Error: la cantidad de usuarios debe ser un número entero.\n";
+                cleanup_lockfile();
                 return 1;
             }
             max_usuarios = std::stoi(valor);
@@ -672,6 +715,7 @@ int main(int argc, char* argv[]) {
         } else {
             std::cerr << "Parámetro no reconocido o incompleto: " << arg << "\n";
             mostrar_ayuda();
+            cleanup_lockfile();
             return 1;
         }
     }
@@ -680,41 +724,34 @@ int main(int argc, char* argv[]) {
     if (!puerto_set || !usuarios_set || !archivo_set) {
         std::cerr << "Faltan parámetros requeridos.\n\n";
         mostrar_ayuda();
+        cleanup_lockfile();
         return 1;
     }
 
     if (puerto <= 0 || puerto > 65535) {
         std::cerr << "Error: el puerto debe estar entre 1 y 65535.\n";
+        cleanup_lockfile();
         return 1;
     }
 
     if (max_usuarios <= 0) {
         std::cerr << "Error: la cantidad de usuarios debe ser mayor a cero.\n";
+        cleanup_lockfile();
         return 1;
-    }
-
-    if(sem_trywait(semServerUnico) != 0)
-    {
-        std::cout << "Ya existe un proceso servidor corriendo en la computadora." << std::endl;
-        exit(1);
     }
 
     std::ifstream prueba(archivo_frases);
     if (!prueba.is_open()) {
         std::cerr << "Error: no se pudo abrir el archivo de frases: " << archivo_frases << "\n";
-        sem_unlink(SemServerUnico);
-        munmap(memoria, tam);
-        shm_unlink(NombreMemoria);
+        cleanup_lockfile();
         return 1;
     }
     prueba.close();
 
-    int servidor_fd = socket(AF_INET, SOCK_STREAM, 0);
+    servidor_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (servidor_fd == -1) {
         std::cerr << "Error al crear socket\n";
-        sem_unlink(SemServerUnico);
-        munmap(memoria, tam);
-        shm_unlink(NombreMemoria);
+        cleanup_lockfile();
         return 1;
     }
 
@@ -725,17 +762,13 @@ int main(int argc, char* argv[]) {
 
     if (bind(servidor_fd, (sockaddr*)&direccion, sizeof(direccion)) < 0) {
         std::cerr << "Error en bind()\n";
-        sem_unlink(SemServerUnico);
-        munmap(memoria, tam);
-        shm_unlink(NombreMemoria);
+        cleanup_lockfile();
         return 1;
     }
 
     if (listen(servidor_fd, max_usuarios) < 0) {
         std::cerr << "Error en listen()\n";
-        sem_unlink(SemServerUnico);
-        munmap(memoria, tam);
-        shm_unlink(NombreMemoria);
+        cleanup_lockfile();
         return 1;
     }
 
@@ -744,6 +777,7 @@ int main(int argc, char* argv[]) {
     std::cout << "📋 Comandos de control:\n";
     std::cout << "   • kill -USR1 " << getpid() << "       → Cierre si no hay partidas\n";
     std::cout << "   • kill -USR2 " << getpid() << "       → Terminar partidas y cerrar\n";
+    std::cout << "   • kill -TERM " << getpid() << "       → Terminar servidor (igual que USR2)\n";
     std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
 
     while (true) {
@@ -761,13 +795,22 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
+        // Verificar límite de usuarios
+        {
+            std::lock_guard<std::mutex> lock(mutex_jugadores);
+            if ((int)jugadores.size() >= max_usuarios) {
+                const char* rechazo = "Error: Servidor completo. Máximo de usuarios alcanzado.\n";
+                send(cliente_fd, rechazo, strlen(rechazo), 0);
+                close(cliente_fd);
+                std::cout << "Conexión rechazada: servidor completo (" << jugadores.size() << "/" << max_usuarios << " usuarios)\n";
+                continue;
+            }
+        }
+
         std::thread hilo_cliente(manejar_conexion, cliente_fd);
         hilo_cliente.detach();
     }
 
-    sem_unlink(SemServerUnico);
-    munmap(memoria, tam);
-    shm_unlink(NombreMemoria);
-    close(servidor_fd);
+    cleanup_lockfile();
     return 0;
 }
