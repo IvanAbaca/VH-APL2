@@ -308,7 +308,17 @@ int main(int argc, char* argv[]) {
                         }
                         sem_post(sem_mutex);
                     }
-
+                    else if (esFraseCorrecta(frase_original,frase_ofuscada)){
+                        cout << "[Servidor] Frase sugerida correcta, finalizando partida." << endl;
+                        auto fin = chrono::steady_clock::now();
+                        chrono::duration<double> duracion = fin - ini;
+                        jugador.tiempo_segundos = duracion.count();
+                        sem_wait(sem_mutex);
+                        juego->juego_terminado = true;
+                        juego->victoria = true;
+                        sem_post(sem_mutex);
+                        juego_terminado = true;
+                    }
                     cout << "[Servidor] Frase actualizada: " << frase_ofuscada << endl;
 
                     sem_wait(sem_mutex);
