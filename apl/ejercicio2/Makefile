@@ -1,10 +1,4 @@
-all: clean ejercicio
+all: ejercicio2
 
-ejercicio: ejercicio2.cpp
+ejercicio2: ejercicio2.cpp
 	g++ ejercicio2.cpp -o ejercicio2 -pthread -std=c++17
-
-clean:
-	rm -f ejercicio2
-
-clear:
-	clear
