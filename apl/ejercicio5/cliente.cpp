@@ -16,12 +16,24 @@
 #include <signal.h>  // Agregado para manejo de señales
 
 #define BUFFER_SIZE 1024
+int cliente_fd = -1;  // Variable global para el socket del cliente
 
 // Manejador de señales SIGINT
-void manejador_sigint(int sig) {
-    // Simplemente ignora la señal - no hace nada
-    // Opcionalmente puedes mostrar un mensaje
-    std::cout << "\n[SIGINT ignorado]\n";
+void manejador_seniales(int sig) {
+    if (sig == SIGTERM) {
+        std::cout << "\n[Señal SIGTERM recibida, cerrando cliente...]\n";
+        if (cliente_fd != -1) {
+            close(cliente_fd);
+            cliente_fd = -1;
+            std::cout << "Socket cerrado correctamente.\n";
+        }
+    } else if (sig == SIGINT) {
+        std::cout << "\n[Señal SIGINT recibida, ignorando...]\n";
+        return;  // Ignorar SIGINT
+    } else {
+        std::cout << "\n[Señal desconocida recibida: " << sig << "]\n";
+        return;  // Ignorar otras señales
+    }
 }
 
 bool es_entero(const std::string& s) {
@@ -39,7 +51,8 @@ void mostrar_ayuda() {
 
 int main(int argc, char* argv[]) {
     // Configurar el manejador de señales SIGINT al inicio del programa
-    signal(SIGINT, manejador_sigint);
+    signal(SIGINT, manejador_seniales);
+    signal(SIGTERM, manejador_seniales);
     
     std::string nickname, ip_servidor;
     int puerto = -1;
@@ -96,7 +109,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    int cliente_fd = socket(AF_INET, SOCK_STREAM, 0);
+    cliente_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (cliente_fd == -1) {
         std::cerr << "Error al crear socket\n";
         return 1;
@@ -108,6 +121,7 @@ int main(int argc, char* argv[]) {
     servidor.sin_addr.s_addr = inet_addr(ip_servidor.c_str());
 
     if (connect(cliente_fd, (sockaddr*)&servidor, sizeof(servidor)) < 0) {
+        close(cliente_fd);
         std::cerr << "Error al conectar con el servidor\n";
         return 1;
     }
@@ -126,6 +140,7 @@ int main(int argc, char* argv[]) {
         if (respuesta.find("Error") != std::string::npos ||
             respuesta.find("rechazada") != std::string::npos ||
             respuesta.find("El juego ya ha comenzado") != std::string::npos) {
+            close(cliente_fd);
             std::cout << "Conexión finalizada.\n";
             close(cliente_fd);
             return 0;

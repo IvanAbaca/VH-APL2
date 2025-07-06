@@ -12,9 +12,10 @@ cd ./ejercicio5
 ./servidor -p 5000 -u 3 -a frases.txt
 
 # Caso base Cliente
-./cliente -n doss -p 5000 -s 127.0.0.1
-./cliente -n ecireneb -p 5000 -s 127.0.0.1
-./cliente -n asd -p 5000 -s 127.0.0.1
+./cliente -n uno -p 5000 -s 127.0.0.1
+./cliente -n dos -p 5000 -s 127.0.0.1
+./cliente -n tres -p 5000 -s 127.0.0.1
+./cliente -n cuatro -p 5000 -s 127.0.0.1
 
 # Casos de error que cubre:
 ./servidor -p 5000
