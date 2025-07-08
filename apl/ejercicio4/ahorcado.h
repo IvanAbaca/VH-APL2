@@ -29,6 +29,8 @@
 #include <cctype>
 #include <iomanip>
 
+
+
 #define SHM_SIZE 1024
 
 using namespace std;
@@ -45,6 +47,7 @@ struct juegoCompartido {
     bool juego_terminado;
     bool victoria;
     pid_t pid_cliente;
+    pid_t pid_servidor;
 };
 
 struct rankingEntry {
