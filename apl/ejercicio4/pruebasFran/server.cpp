@@ -197,6 +197,7 @@ int main(int argc, char* argv[]) {
     signal(SIGINT,SIG_IGN);
     signal(SIGUSR1, handle_sigusr1);
     signal(SIGUSR2, handle_sigusr2);
+    signal(SIGTERM,handle_sigusr2);
 
     // Compartir memoria y abrir semáforos
     key_t key = ftok("shmfile", 65);
@@ -214,6 +215,11 @@ int main(int argc, char* argv[]) {
     sem_t* sem_inicio_op2 = sem_open(SEM_INICIO_2_NAME, O_CREAT, 0666, 0);
     sem_t* sem_frase_intento_lista = sem_open(SEM_FRASE_I_NAME, O_CREAT, 0666, 0);
     
+
+    sem_wait(sem_mutex);
+    juego->pid_servidor = getpid();
+    sem_post(sem_mutex);
+
     cout << "[Servidor] Inicialización finalizada" << endl;
 
     while (true) {
