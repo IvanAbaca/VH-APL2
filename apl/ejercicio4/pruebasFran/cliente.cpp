@@ -71,7 +71,7 @@ bool esperaServidor(sem_t* sem,sem_t* mutex,pid_t pid_server){ //funcion a la qu
                 ts.tv_sec +=1;
                 int wait_result = sem_timedwait(sem,&ts);
                 if(wait_result == -1 && errno == ETIMEDOUT){
-                    //cout << "[Servidor] TIMEOUT" << endl;
+                    cout << "[Cliente] TIMEOUT" << endl;
                     bool desconectado = false;
                     desconectado = (kill(pid_server,0) == -1);                
     

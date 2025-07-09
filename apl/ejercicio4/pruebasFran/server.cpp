@@ -58,7 +58,10 @@ void mostrarRanking(const vector<rankingEntry>& ranking) {
     cout << "\n==============================================\n";
 }
 
-void handle_sigusr1(int) { terminar_sig1 = 1; }
+void handle_sigusr1(int) { 
+    terminar_sig1 = 1;
+    cout << "[Servidor] Señal SIGUSR1 recibida." << endl;
+}
 
 void handle_sigusr2(int) { 
 
@@ -313,21 +316,30 @@ int main(int argc, char* argv[]) {
         auto ini = chrono::steady_clock::now();
 
         while (!juego_terminado) {
-            clock_gettime(CLOCK_REALTIME, &ts);
-            ts.tv_sec +=5;
-            wait_result = sem_timedwait(sem_opcion_lista,&ts);
-            if(wait_result == -1 && errno == ETIMEDOUT){
-                cout << "[Servidor] TIMEOUT" << endl;
-                bool desconectado = false;
-                sem_wait(sem_mutex);
-                desconectado = (kill(juego->pid_cliente,0) == -1);                
-                sem_post(sem_mutex);
 
-                if(desconectado){
-                    cout << "[Servidor] Muerte detectada" << endl;
-                    juego_terminado = true;
+            while(true){
+                clock_gettime(CLOCK_REALTIME, &ts);
+                ts.tv_sec +=5;
+                wait_result = sem_timedwait(sem_opcion_lista,&ts);
+                if(wait_result == -1 && errno == ETIMEDOUT){
+                    cout << "[Servidor] TIMEOUT" << endl;
+                    bool desconectado = false;
+                    sem_wait(sem_mutex);
+                    desconectado = (kill(juego->pid_cliente,0) == -1);                
+                    sem_post(sem_mutex);
+    
+                    if(desconectado){
+                        cout << "[Servidor] Muerte detectada" << endl;
+                        juego_terminado = true;
+                        break;
+                    }
+                } else if (wait_result == 0){
+                    break;
                 }
-                continue;
+            }
+
+            if(juego_terminado){
+                break;
             }
 
             switch (juego->opcion) {
