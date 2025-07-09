@@ -6,10 +6,115 @@
 volatile sig_atomic_t terminar_sig1 = 0;
 volatile sig_atomic_t terminar_sig2 = 0;
 juegoCompartido* juego;
+vector<rankingEntry> ranking;
 
+
+int fd;
+key_t key = ftok("shmfile", 65);
+int shmid = shmget(key, SHM_SIZE, 0666 | IPC_CREAT);
+void* data_shm = shmat(shmid, nullptr, 0);
+
+sem_t* sem_mutex = sem_open(SEM_MUTEX_NAME, O_CREAT, 0666, 1);
+sem_t* sem_letra_lista = sem_open(SEM_LETRA_LISTA_NAME, O_CREAT, 0666, 0);
+sem_t* sem_resultado_listo = sem_open(SEM_RESULTADO_LISTO_NAME, O_CREAT, 0666, 0);
+sem_t* sem_nuevo_cliente = sem_open(SEM_NUEVO_CLIENTE_NAME, O_CREAT, 0666, 0);
+sem_t* sem_frase_lista = sem_open(SEM_FRASE_LISTA_NAME, O_CREAT, 0666, 0);
+sem_t* sem_opcion_lista = sem_open(SEM_OPCION_LISTA_NAME, O_CREAT, 0666, 0);
+sem_t* sem_inicio_op1 = sem_open(SEM_INICIO_1_NAME, O_CREAT, 0666, 0);
+sem_t* sem_inicio_op2 = sem_open(SEM_INICIO_2_NAME, O_CREAT, 0666, 0);
+sem_t* sem_frase_intento_lista = sem_open(SEM_FRASE_I_NAME, O_CREAT, 0666, 0);
+
+
+void mostrarRanking(const vector<rankingEntry>& ranking) {
+
+    vector<rankingEntry> ordenado = ranking;
+    sort(ordenado.begin(), ordenado.end(), [](const rankingEntry& a, const rankingEntry& b) {
+        return a.tiempo_segundos < b.tiempo_segundos;
+    });
+
+    cout << "\n=========  RANKING DE JUGADORES  =========\n\n";
+    cout << left << setw(5) << "#" 
+         << setw(15) << "Jugador" 
+         << setw(50) << "Frase Adivinada" 
+         << setw(12) << "Tiempo (mm:ss)"
+         << "\n" << string(85, '-') << "\n";
+
+    for (size_t i = 0; i < ordenado.size(); ++i) {
+        int minutos = static_cast<int>(ordenado[i].tiempo_segundos) / 60;
+        double segundos_restantes = ordenado[i].tiempo_segundos - (minutos * 60);
+
+        stringstream tiempo_formateado;
+        tiempo_formateado << setfill('0') << setw(2) << minutos << ":"
+                          << fixed << setprecision(2)
+                          << setw(5) << segundos_restantes;
+
+        cout << left << setw(5) << (i + 1)
+             << setw(15) << ordenado[i].nickname
+             << setw(50) << ordenado[i].frase
+             << setw(12) << tiempo_formateado.str()
+             << endl;
+    }
+
+    cout << "\n==============================================\n";
+}
 
 void handle_sigusr1(int) { terminar_sig1 = 1; }
-void handle_sigusr2(int) { terminar_sig2 = 1; }
+
+void handle_sigusr2(int) { 
+
+    pid_t pid_cliente;
+    // Liberar recursos
+    cout << "[Servidor] Finalizando, liberando recursos...\n";
+
+    sem_wait(sem_mutex);
+    pid_cliente = juego ->pid_cliente;
+    sem_post(sem_mutex);
+
+    if(kill(pid_cliente,SIGUSR2) == 0){
+        cout << "[Servidor] Señal de finalización enviada al cliente" << endl;
+    }else if (errno == ESRCH){
+        cout << "[Servidor] No hay partidas en progreso, finalizando" << endl;
+    }
+
+
+    sem_close(sem_mutex);
+    sem_close(sem_letra_lista);
+    sem_close(sem_resultado_listo);
+    sem_close(sem_nuevo_cliente);
+    sem_close(sem_frase_lista);
+    sem_close(sem_opcion_lista);
+    sem_close(sem_inicio_op1);
+    sem_close(sem_inicio_op2);
+    sem_close(sem_frase_intento_lista);
+
+    sem_unlink(SEM_MUTEX_NAME);
+    sem_unlink(SEM_LETRA_LISTA_NAME);
+    sem_unlink(SEM_RESULTADO_LISTO_NAME);
+    sem_unlink(SEM_NUEVO_CLIENTE_NAME);
+    sem_unlink(SEM_FRASE_LISTA_NAME);
+    sem_unlink(SEM_OPCION_LISTA_NAME);
+    sem_unlink(SEM_INICIO_1_NAME);
+    sem_unlink(SEM_INICIO_2_NAME);
+    sem_unlink(SEM_FRASE_I_NAME);
+
+
+    //libero el lockfile para permitir crear otro servidor
+    close(fd);
+    unlink("/tmp/ahorcado_server.lock");
+
+
+    shmdt(data_shm);
+    shmctl(shmid, IPC_RMID, nullptr);
+
+    if(ranking.empty()){
+        cout << "[Servidor] No se registraron partidas" << endl;
+    }
+    else {
+        mostrarRanking(ranking);
+    }
+
+    exit(0);
+}
 
 vector<string> leer_frases(const string& nombre_archivo){
     vector<string> frases;
@@ -108,41 +213,6 @@ bool esperaCliente(sem_t* sem,sem_t* mutex){ //funcion a la que le pasas el sema
 }
 
 
-void mostrarRanking(const vector<rankingEntry>& ranking) {
-
-    vector<rankingEntry> ordenado = ranking;
-    sort(ordenado.begin(), ordenado.end(), [](const rankingEntry& a, const rankingEntry& b) {
-        return a.tiempo_segundos < b.tiempo_segundos;
-    });
-
-    cout << "\n=========  RANKING DE JUGADORES  =========\n\n";
-    cout << left << setw(5) << "#" 
-         << setw(15) << "Jugador" 
-         << setw(50) << "Frase Adivinada" 
-         << setw(12) << "Tiempo (mm:ss)"
-         << "\n" << string(85, '-') << "\n";
-
-    for (size_t i = 0; i < ordenado.size(); ++i) {
-        int minutos = static_cast<int>(ordenado[i].tiempo_segundos) / 60;
-        double segundos_restantes = ordenado[i].tiempo_segundos - (minutos * 60);
-
-        stringstream tiempo_formateado;
-        tiempo_formateado << setfill('0') << setw(2) << minutos << ":"
-                          << fixed << setprecision(2)
-                          << setw(5) << segundos_restantes;
-
-        cout << left << setw(5) << (i + 1)
-             << setw(15) << ordenado[i].nickname
-             << setw(50) << ordenado[i].frase
-             << setw(12) << tiempo_formateado.str()
-             << endl;
-    }
-
-    cout << "\n==============================================\n";
-}
-
-
-
 int main(int argc, char* argv[]) {
 
     string archivo;
@@ -175,10 +245,9 @@ int main(int argc, char* argv[]) {
     }
     
     vector<string> frases = leer_frases(archivo);
-    vector<rankingEntry> ranking;
     
     //valido que no exista otro servidor corriendo usando un lockfile
-    int fd = open("/tmp/ahorcado_server.lock", O_CREAT | O_EXCL, 0644);
+    fd = open("/tmp/ahorcado_server.lock", O_CREAT | O_EXCL, 0644);
     if (fd == -1) {
         cerr << "[Servidor] Error: Ya hay un servidor en ejecución, abortando iniciación." << endl;
         exit(1);
@@ -199,22 +268,7 @@ int main(int argc, char* argv[]) {
     signal(SIGUSR2, handle_sigusr2);
     signal(SIGTERM,handle_sigusr2);
 
-    // Compartir memoria y abrir semáforos
-    key_t key = ftok("shmfile", 65);
-    int shmid = shmget(key, SHM_SIZE, 0666 | IPC_CREAT);
-    void* data = shmat(shmid, nullptr, 0);
-    juego = static_cast<juegoCompartido*>(data);
-
-    sem_t* sem_mutex = sem_open(SEM_MUTEX_NAME, O_CREAT, 0666, 1);
-    sem_t* sem_letra_lista = sem_open(SEM_LETRA_LISTA_NAME, O_CREAT, 0666, 0);
-    sem_t* sem_resultado_listo = sem_open(SEM_RESULTADO_LISTO_NAME, O_CREAT, 0666, 0);
-    sem_t* sem_nuevo_cliente = sem_open(SEM_NUEVO_CLIENTE_NAME, O_CREAT, 0666, 0);
-    sem_t* sem_frase_lista = sem_open(SEM_FRASE_LISTA_NAME, O_CREAT, 0666, 0);
-    sem_t* sem_opcion_lista = sem_open(SEM_OPCION_LISTA_NAME, O_CREAT, 0666, 0);
-    sem_t* sem_inicio_op1 = sem_open(SEM_INICIO_1_NAME, O_CREAT, 0666, 0);
-    sem_t* sem_inicio_op2 = sem_open(SEM_INICIO_2_NAME, O_CREAT, 0666, 0);
-    sem_t* sem_frase_intento_lista = sem_open(SEM_FRASE_I_NAME, O_CREAT, 0666, 0);
-    
+    juego = static_cast<juegoCompartido*>(data_shm);
 
     sem_wait(sem_mutex);
     juego->pid_servidor = getpid();
@@ -223,8 +277,6 @@ int main(int argc, char* argv[]) {
     cout << "[Servidor] Inicialización finalizada" << endl;
 
     while (true) {
-        if (terminar_sig2) break;
-
         timespec ts; //espero un nuevo cliente con timeout para chequear señales
         clock_gettime(CLOCK_REALTIME, &ts);
         ts.tv_sec += 1;
@@ -261,17 +313,6 @@ int main(int argc, char* argv[]) {
         auto ini = chrono::steady_clock::now();
 
         while (!juego_terminado) {
-            if (terminar_sig2) {
-                cout << "[Servidor] Terminando partida actual por SIGUSR2...\n";
-                sem_wait(sem_mutex);
-                juego->juego_terminado = true;
-                strncpy(juego->progreso, frase_original.c_str(), 128);
-                sem_post(sem_mutex);
-                sem_post(sem_resultado_listo);
-                juego_terminado = true;
-                break;
-            }
-
             clock_gettime(CLOCK_REALTIME, &ts);
             ts.tv_sec +=5;
             wait_result = sem_timedwait(sem_opcion_lista,&ts);
@@ -294,7 +335,6 @@ int main(int argc, char* argv[]) {
                 case '1': {
                     sem_post(sem_inicio_op1);
 
-                    //sem_wait(sem_letra_lista);
                     juego_terminado = esperaCliente(sem_letra_lista,sem_mutex);
                     if(juego_terminado){
                         break;
@@ -310,6 +350,7 @@ int main(int argc, char* argv[]) {
                         sem_wait(sem_mutex);
                         if (--juego->intentos_restantes == 0) {
                             juego->juego_terminado = true;
+                            juego->victoria = false;
                             juego_terminado = true;
                         }
                         sem_post(sem_mutex);
@@ -338,7 +379,6 @@ int main(int argc, char* argv[]) {
                 //opcion 2: adivinar frase 
                 case '2': {
                     sem_post(sem_inicio_op2);
-                    //sem_wait(sem_frase_intento_lista);
 
                     juego_terminado = esperaCliente(sem_frase_intento_lista,sem_mutex);
                     if(juego_terminado){
@@ -441,7 +481,7 @@ int main(int argc, char* argv[]) {
     unlink("/tmp/ahorcado_server.lock");
 
 
-    shmdt(data);
+    shmdt(data_shm);
     shmctl(shmid, IPC_RMID, nullptr);
 
     return 0;
