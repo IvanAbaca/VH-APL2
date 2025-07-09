@@ -23,7 +23,14 @@ void help(){
 }
 
 void finalizar_partida() {
-    cout << "\n[Cliente] Finalizando y liberando recursos...\n";
+    cout << "\n\t\t////////////////////////////////////////////////////////////////////\n";
+    cout << "\t\t///                          ATENCIÓN                           ///\n";
+    cout << "\t\t///     El servidor de juego ya no se encuentra disponible      ///\n";
+    cout << "\t\t///         Finalizando y liberando recursos...                 ///\n";
+    cout << "\t\t///                          ATENCIÓN                           ///\n";
+    cout << "\t\t////////////////////////////////////////////////////////////////////\n";
+
+
 
     if (sem_mutex != SEM_FAILED) sem_close(sem_mutex);
     if (sem_letra_lista != SEM_FAILED) sem_close(sem_letra_lista);
@@ -56,6 +63,32 @@ void handle_sigusr2(int){
 };
 
 
+bool esperaServidor(sem_t* sem,sem_t* mutex,pid_t pid_server){ //funcion a la que le pasas el semaforo que queres esperar y el mutex para el acceso a la shm, para verificar si el cliente sigue activo
+        while (true)
+        {
+                timespec ts;
+                clock_gettime(CLOCK_REALTIME, &ts);
+                ts.tv_sec +=1;
+                int wait_result = sem_timedwait(sem,&ts);
+                if(wait_result == -1 && errno == ETIMEDOUT){
+                    //cout << "[Cliente] TIMEOUT" << endl;
+                    bool desconectado = false;
+                    desconectado = (kill(pid_server,0) == -1);                
+    
+                    if(desconectado){
+                        //cout << "[Servidor] Muerte detectada" << endl;
+                        return true;
+                    }
+                    continue;
+                }
+                else if (wait_result != -1){
+                    //cout << "[Servidor] Espera finalizada" << endl;
+                    return false;
+                }
+            }
+}
+
+
 int main(int argc, char* argv[]) {
 
     string nickname;
@@ -63,6 +96,7 @@ int main(int argc, char* argv[]) {
     signal(SIGINT,SIG_IGN);
     signal(SIGUSR1,handle_sigusr1);
     signal(SIGUSR2,handle_sigusr2);
+    signal(SIGTERM,handle_sigusr2);
 
     //tomo los parametros
     for(int i = 1; i < argc; i++){
@@ -117,11 +151,13 @@ int main(int argc, char* argv[]) {
     char progreso[128];
     char frase_sugerida[128];
     bool juego_terminado = false; 
-    int intentos = 0; 
+    int intentos = 0;
+    pid_t pid_server; 
 
     sem_wait(sem_mutex);
     strncpy(juego->usuario_nickname,nickname.c_str(),128);
     juego->pid_cliente = getpid();
+    pid_server = juego->pid_servidor;
     sem_post(sem_mutex);
 
     sem_post(sem_nuevo_cliente);
@@ -150,7 +186,6 @@ int main(int argc, char* argv[]) {
             break;
         }
 
-
         cout << "Menú de juego:\n"; 
         cout << "1 - Enviar letra\n";
         cout << "2 - Adivinar palabra\n"; 
@@ -169,15 +204,12 @@ int main(int argc, char* argv[]) {
         switch (opcion[0]) {
             //opcion 1: adivinar letra
             case '1': {
-                sem_wait(sem_inicio_1); 
-
-                /*
-                cout << "Ingrese una letra: ";
-                do {
-                    getline(cin, letraS);
-                } while (letraS.empty()); 
-                letra = letraS[0];
-                */
+                //sem_wait(sem_inicio_1);
+                
+                juego_terminado = esperaServidor(sem_inicio_1,sem_mutex,pid_server);
+                if(juego_terminado){
+                    finalizar_partida();
+                } 
 
                 do{
                     cout << "Ingrese una letra: ";
@@ -213,7 +245,13 @@ int main(int argc, char* argv[]) {
             }
             //opcion 2: adivinar frase
             case '2': {
-                sem_wait(sem_inicio_op2);
+                //sem_wait(sem_inicio_op2);
+                
+                juego_terminado = esperaServidor(sem_inicio_op2,sem_mutex,pid_server);
+                if(juego_terminado){
+                    finalizar_partida();
+                }
+                
                 char frase_ingresada[128];
                 cout << "Ingrese una frase: ";
                 cin.getline(frase_ingresada,128);
@@ -225,7 +263,13 @@ int main(int argc, char* argv[]) {
                 break;
             }
             case '3':{
-                sem_wait(sem_inicio_1);
+                //sem_wait(sem_inicio_1);
+                
+                juego_terminado = esperaServidor(sem_inicio_1,sem_mutex,pid_server);
+                if(juego_terminado){
+                    finalizar_partida();
+                }
+                
                 sem_wait(sem_resultado_listo);     
             }
         }
